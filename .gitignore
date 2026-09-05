@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+venv/
+.venv/
+env/
+.env
+*.log
+
+# Model weights & large artifacts
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pb
+weights/
+checkpoints/
+
+# Datasets (never commit raw data)
+data/raw/
+data/*.zip
+*.csv
+*.mp4
+*.avi
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+!dashboard/src/assets/**
+
+# Video clips captured for training (privacy + size — never commit raw clips)
+clips/
+recorded_events/
+
+# Node (dashboard)
+node_modules/
+dist/
+build/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Federated / DB
+*.db
+*.sqlite3
+
+# Jupyter
+.ipynb_checkpoints/
