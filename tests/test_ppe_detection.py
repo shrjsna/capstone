@@ -13,8 +13,14 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
+import sys
 import tempfile
 import pytest
+
+# Ensure repository root is in sys.path for test discovery in CI
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from edge.ppe_detection.data.prepare_dataset import (
     CLASS_TO_ID,
