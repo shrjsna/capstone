@@ -1,0 +1,4 @@
+{"camera_id": "cam_01", "zone_id": "zone_red_1", "event_type": "zone_intrusion", "class": "person_in_zone", "confidence": 0.92, "tracked_id": "person_3", "timestamp": "2026-09-21T05:34:05Z", "frame_count_triggered": 4, "clip_captured": false}
+{"camera_id": "cam_01", "zone_id": "zone_red_1", "event_type": "zone_intrusion", "class": "person_in_zone", "confidence": 0.93, "tracked_id": "person_3", "timestamp": "2026-09-21T05:34:09Z", "frame_count_triggered": 4, "clip_captured": false}
+{"camera_id": "cam_01", "zone_id": "zone_red_1", "event_type": "zone_intrusion", "class": "person_in_zone", "confidence": 0.87, "tracked_id": "person_4", "timestamp": "2026-09-21T05:34:32Z", "frame_count_triggered": 4, "clip_captured": false}
+{"camera_id": "cam_01", "zone_id": "zone_red_1", "event_type": "zone_intrusion", "class": "person_in_zone", "confidence": 0.86, "tracked_id": "person_18", "timestamp": "2026-09-21T05:36:24Z", "frame_count_triggered": 4, "clip_captured": false}
