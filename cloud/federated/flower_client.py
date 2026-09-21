@@ -55,7 +55,7 @@ def main():
     parser.add_argument("--server-address", type=str, default="127.0.0.1:8089", help="Flower server gRPC address")
     args = parser.parse_args()
 
-    print(f"=== Starting Federated Client [{args.site-id}] connecting to {args.server-address} ===")
+    print(f"=== Starting Federated Client [{args.site_id}] connecting to {args.server_address} ===")
     client = BanditSiteClient(site_id=args.site_id)
     
     try:

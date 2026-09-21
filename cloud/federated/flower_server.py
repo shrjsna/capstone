@@ -16,7 +16,7 @@ def main():
     args = parser.parse_args()
 
     print(f"=== Starting Flower FedAvg Server on {args.address} ===")
-    print(f"=== Config: {args.rounds} rounds, min {args.min-clients} clients per round ===")
+    print(f"=== Config: {args.rounds} rounds, min {args.min_clients} clients per round ===")
     print("=== Privacy Guarantee: Only policy weight vectors are aggregated ===")
 
     # Define FedAvg strategy
