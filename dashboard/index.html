@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGIS — Collaborative AI Safety Operations Console</title>
+  <!-- Modern Industrial Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">
+        <span class="pulse-ring"></span>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="system-name">AEGIS SAFETY</span>
+        <span class="system-sub">Edge-Cloud Collaborative AI</span>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <div class="status-indicator">
+        <span class="dot live-dot"></span>
+        <span class="status-label">SYSTEM LIVE</span>
+      </div>
+      <div class="policy-badge">
+        <span class="badge-title">POLICY</span>
+        <span id="header-policy-ver" class="badge-val">v1.0.0-mock</span>
+      </div>
+      <div class="backend-url-selector">
+        <input type="text" id="api-url-input" value="http://127.0.0.1:8000" placeholder="Backend API URL">
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Console Grid Layout -->
+  <main class="console-grid">
+    
+    <!-- Hero Centerpiece: Live Alert Feed -->
+    <section class="panel feed-panel">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <h2>Real-Time Detection Feed</h2>
+          <span id="alert-count-badge" class="counter-pill">0 Alerts</span>
+        </div>
+        <div class="feed-controls">
+          <button id="btn-refresh" class="btn-icon" title="Refresh Feed">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+            </svg>
+          </button>
+          <div class="filter-group">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="ppe_violation">PPE Only</button>
+            <button class="filter-btn" data-filter="zone_intrusion">Intrusion Only</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feed Container -->
+      <div id="alert-feed-container" class="feed-container">
+        <!-- Empty State -->
+        <div class="feed-empty-state" id="feed-empty">
+          <div class="empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+          </div>
+          <h3>No Safety Alerts Detected</h3>
+          <p>Listening for edge detection events from Camera A and Camera B...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sidebar Right Panel: Policy & Threshold Monitor -->
+    <aside class="panel side-panel">
+      <!-- Zone Threshold Monitor -->
+      <div class="sub-panel">
+        <div class="panel-header compact">
+          <h3>Zone Sensitivity Thresholds</h3>
+          <span class="info-tag">Human-in-the-Loop</span>
+        </div>
+        <p class="panel-desc">Thresholds automatically calibrate as operators confirm or reject alerts.</p>
+        
+        <div id="thresholds-container" class="thresholds-list">
+          <!-- Zone threshold meters dynamically injected -->
+          <div class="threshold-card">
+            <div class="t-head">
+              <span class="t-zone">zone_a</span>
+              <span class="t-val" id="t-val-zone_a">0.70</span>
+            </div>
+            <div class="meter-bar">
+              <div class="meter-fill" id="t-fill-zone_a" style="width: 70%;"></div>
+            </div>
+          </div>
+          <div class="threshold-card">
+            <div class="t-head">
+              <span class="t-zone">zone_b</span>
+              <span class="t-val" id="t-val-zone_b">0.75</span>
+            </div>
+            <div class="meter-bar">
+              <div class="meter-fill" id="t-fill-zone_b" style="width: 75%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Policy Versioning Log -->
+      <div class="sub-panel margin-top">
+        <div class="panel-header compact">
+          <h3>Policy Evolution History</h3>
+        </div>
+        <div id="policy-history-list" class="history-list">
+          <!-- Policy history items dynamically injected -->
+        </div>
+      </div>
+
+      <!-- Quick Demo Trigger Panel -->
+      <div class="sub-panel margin-top demo-box">
+        <div class="panel-header compact">
+          <h3>Simulate Edge Detection</h3>
+        </div>
+        <p class="panel-desc">POST synthetic events to test backend decisioning & UI feedback loops.</p>
+        <div class="demo-btn-grid">
+          <button id="btn-sim-ppe" class="btn-demo ppe">
+            + PPE Violation
+          </button>
+          <button id="btn-sim-zone" class="btn-demo zone">
+            + Zone Intrusion
+          </button>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

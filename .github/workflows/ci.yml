@@ -25,10 +25,10 @@ jobs:
           pip install pytest
 
       - name: Run tests
-        run: pytest tests/ -v
+        run: python -m pytest tests/ -v --tb=short
 
       - name: Lint check
         run: |
           pip install flake8
           # Fail only on actual errors, not style nitpicks, to keep this fast for a student team
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --exclude=.venv,.pytest_cache --count --select=E9,F63,F7,F82 --show-source --statistics
