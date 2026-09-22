@@ -96,3 +96,23 @@ Why: trades responsiveness for simplicity within the capstone timeline; a
 feedback-gated threshold update is noted as future work.
 
 
+
+## 2026-09-22 — Real Module C integration completed in cloud/backend/adapter.py
+Decided: replace MockBanditAdapter with RealBanditAdapter in cloud/backend/adapter.py.
+Why: MockBanditAdapter used hardcoded threshold logic that did not call the real ContextualBandit.
+RealBanditAdapter wraps ContextualBandit (cloud/decision_layer/bandit.py), calls .predict() for
+decisions, .update() for online feedback, and warm-starts from the same seed dataset as
+train_baseline.py (policy_v1 baseline, validation_score ≥ 0.75). The singleton adapter instance
+is pre-warmed at server startup so the first live event receives a real trained decision.
+MockBanditAdapter is retained in the file for isolated testing; swap the factory function to
+revert if needed.
+
+## 2026-09-22 — Real Module C A/b matrix serialization in cloud/federated/adapter.py
+Decided: upgrade PolicyWeightAdapter to serialize the full ContextualBandit A/b precision matrices
+(3 actions × (16×16 A + 16×1 b) = 816 float64 values across 6 arrays) instead of the previous
+5-element placeholder threshold vector.
+Why: the 5-element vector captured only threshold summaries — not the learned policy weights
+themselves — so FedAvg was averaging meaningless proxies rather than actual model state.
+The legacy dict_to_weights/weights_to_dict methods are retained for flower_client.py's
+threshold-dict local-adaptation step, which does not need full matrix serialization.
+Privacy guarantee is unchanged: only numeric weight values cross site boundaries.
