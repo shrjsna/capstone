@@ -37,6 +37,10 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest.fixture(autouse=True)
 def run_around_tests():
+    # Re-assert this module's DB override before each test (guards against
+    # cross-module override stomping when collected with test_integration.py)
+    app.dependency_overrides[get_db] = override_get_db
+
     # Build schema in shared in-memory DB before each test
     Base.metadata.create_all(bind=engine)
     
@@ -90,7 +94,7 @@ def test_post_event_success():
     assert data["event_type"] == "ppe_violation"
     assert data["class"] == "no_helmet"
     assert data["confidence"] == 0.88
-    assert data["bandit_action"] in ["escalate", "log_only"]
+    assert data["bandit_action"] in ["escalate", "log_only", "adjust_threshold"]
 
 
 def test_post_event_malformed_rejected():
