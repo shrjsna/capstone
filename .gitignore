@@ -15,12 +15,17 @@ env/
 *.onnx
 *.h5
 *.pb
+edge/ppe_detection/models/*.pt
 weights/
 checkpoints/
+runs/
 
 # Datasets (never commit raw data)
 data/raw/
 data/*.zip
+edge/ppe_detection/data/raw/
+edge/ppe_detection/data/merged/
+*.jsonl
 *.csv
 *.mp4
 *.avi

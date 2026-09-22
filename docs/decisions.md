@@ -66,3 +66,33 @@ across 2-3 simulated "sites" (separate cameras/instances).
 Why: no realistic access to an actual factory for a capstone timeline; this
 is standard practice for student FL projects and will be stated explicitly
 as a limitation/future-work item in the report.
+
+## 2026-09-07 — PPE final model choice: v4 over v5
+Decided: select ppe_yolov11n_v4 checkpoint (ppe_final_v4.pt) as production model for Module A.
+Why: v4 achieves higher aggregate mAP50 (0.7366 vs 0.7218) and mAP50-95 (0.4949 vs 0.4793) with higher precision (0.8816 vs 0.7775). While experimental v5 attempted to improve no_goggles, it caused unacceptable regressions in no_gloves and no_mask.
+
+## 2026-09-07 — PPE dataset limitations: no_boots and no_goggles data scarcity
+Decided: accept no_boots (mAP50 ≈ 0.0–0.03) and no_goggles (mAP50 ≈ 0.16–0.53) performance as documented data-scarcity limitations without further hyperparameter tuning.
+Why: count_classes analysis confirms no_boots has only 108 train instances (38 images, 721 total across all 4 datasets) compared to 5,000–11,500+ for well-performing classes (e.g. no_helmet: 11,511 train; no_mask: 8,571 train; no_vest: 6,898 train). no_goggles is similarly data-limited (2,968 train instances) and designated secondary priority.
+## 2026-09-10 — Dual-mode exploration architecture for decision layer
+Decided: support both LinUCB and Thompson Sampling (plus epsilon-greedy baseline)
+behind a strategy flag in ContextualBandit.
+Why: LinUCB provides deterministic, step-by-step scoring ideal for live viva
+demo explainability, while Thompson Sampling provides superior sample efficiency
+under sparse operator feedback. Epsilon-greedy is retained as a baseline for
+comparative benchmarking in the report.
+
+## 2026-09-10 — Safety-first graded reward matrix
+Decided: use a cost-sensitive graded reward matrix where log_only on a confirmed
+violation carries the heaviest penalty (-2.0).
+Why: missed safety violations present direct physical risk to workers and
+represent the worst possible real-world failure mode, requiring a far steeper
+penalty than operator alert fatigue from false escalations (-1.0).
+
+## 2026-09-10 — Immediate threshold adjustment at prediction time
+Decided: threshold adjustment reacts to raw detection confidence at prediction time
+rather than waiting for operator feedback confirmation.
+Why: trades responsiveness for simplicity within the capstone timeline; a
+feedback-gated threshold update is noted as future work.
+
+
