@@ -216,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
       camera_id: isPpe ? 'cam_dock_01' : 'cam_perimeter_03',
       zone_id: isPpe ? 'zone_a' : 'zone_b',
       event_type: eventType,
-      class: isPpe ? 'no_helmet' : 'person_in_restricted_area',
+      class: isPpe ? 'no_helmet' : 'person_in_zone',
       confidence: parseFloat((0.72 + Math.random() * 0.22).toFixed(2)),
       tracked_id: `tr_${Math.floor(1000 + Math.random() * 9000)}`,
       timestamp: new Date().toISOString(),

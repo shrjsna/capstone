@@ -96,3 +96,35 @@ Why: trades responsiveness for simplicity within the capstone timeline; a
 feedback-gated threshold update is noted as future work.
 
 
+
+## 2026-09-22 — Real Module C integration completed in cloud/backend/adapter.py
+Decided: replace MockBanditAdapter with RealBanditAdapter in cloud/backend/adapter.py.
+Why: MockBanditAdapter used hardcoded threshold logic that never called the real
+ContextualBandit. RealBanditAdapter wraps cloud/decision_layer/bandit.py directly,
+calling .predict() for decisions and .update() for online feedback. It warm-starts
+from the same seed dataset as train_baseline.py (policy_v0 → policy_v1, val ≥ 0.60).
+MockBanditAdapter is retained in the file for isolated unit-test use only.
+Key mapping: Pydantic stores JSON "class" as .class_name; _to_bandit_dict() remaps
+it back to "class" before calling bandit.extract_features().
+
+## 2026-09-23 — Final integration verification pass
+Decided: confirm all modules genuinely wired end-to-end; fix two integration bugs found.
+Why: pre-presentation verification required — not just "files exist" but live HTTP evidence.
+Bugs fixed: (1) flower_client.py error-handler referenced `args.site-id` (hyphen, Python
+subtraction) instead of `args.site_id` (underscore); only triggered when gRPC fails, benign
+if server is up first. (2) dashboard/app.js simulateEvent() sent `class: "person_in_restricted_area"`
+for zone_intrusion events — does not match INTERFACES.md; corrected to `"person_in_zone"`.
+Federation note: flwr.server.start_server() and flwr.client.start_numpy_client() emit
+DEPRECATED FEATURE warnings in the installed Flower version. Both still function correctly
+for the 2-round demo. Recommend upgrading to flower-superlink/flower-supernode CLI before
+the next major milestone, but not a blocker for the capstone presentation.
+
+## 2026-09-22 — Real A/b matrix serialisation in cloud/federated/adapter.py
+Decided: upgrade PolicyWeightAdapter to serialise the full ContextualBandit A/b
+precision matrices (3 actions × (256 + 16) = 816 float64 values across 6 arrays)
+instead of the previous 5-element placeholder threshold vector.
+Why: the 5-element vector was a proxy that did not capture actual learned policy
+state, so FedAvg was averaging meaningless numbers. The real A/b matrices ARE the
+policy. Legacy dict_to_weights / weights_to_dict helpers are retained for the
+flower_client.py local-adaptation step which uses a simpler threshold-dict format.
+Privacy guarantee is unchanged: only numeric weight values cross site boundaries.
