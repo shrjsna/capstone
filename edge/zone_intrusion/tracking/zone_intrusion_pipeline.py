@@ -17,9 +17,14 @@ from datetime import datetime, timezone
 import cv2
 from ultralytics import YOLO
 
-from zone_check import load_zone_config, check_box_in_zone
-from debounce_tracker import DebounceTracker
-from clip_capture import RollingClipRecorder, downsample_clip, blur_faces, save_clip, CLIP_FPS
+try:
+    from .zone_check import load_zone_config, check_box_in_zone
+    from .debounce_tracker import DebounceTracker
+    from .clip_capture import RollingClipRecorder, downsample_clip, blur_faces, save_clip, CLIP_FPS
+except (ImportError, ValueError):
+    from zone_check import load_zone_config, check_box_in_zone
+    from debounce_tracker import DebounceTracker
+    from clip_capture import RollingClipRecorder, downsample_clip, blur_faces, save_clip, CLIP_FPS
 
 
 def parse_args():
