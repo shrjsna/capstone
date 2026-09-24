@@ -64,7 +64,7 @@ def main():
             client=client
         )
     except Exception as e:
-        print(f"[{args.site-id} Client Error]: {e}", file=sys.stderr)
+        print(f"[{args.site_id} Client Error]: {e}", file=sys.stderr)
         sys.exit(1)
 
 
