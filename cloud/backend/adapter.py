@@ -1,13 +1,16 @@
 """
 cloud/backend/adapter.py
-BanditAdapter interface and MockBanditAdapter implementation for decision layer isolation.
+BanditAdapter interface, MockBanditAdapter (kept for reference), and
+RealBanditAdapter which wraps the real ContextualBandit from Module C.
 
-NOTE: Replace MockBanditAdapter with RealBanditAdapter once Module C integration is ready.
+Integration status: RealBanditAdapter is active as of 2026-09-22.
+See docs/decisions.md for the dated decision entry.
 """
 
 from abc import ABC, abstractmethod
 from typing import Dict
 from cloud.backend.schemas import DetectionEventCreate, BanditDecisionOutput, OperatorFeedbackCreate
+from cloud.decision_layer.bandit import ContextualBandit
 
 
 class BanditAdapter(ABC):
@@ -29,15 +32,93 @@ class BanditAdapter(ABC):
         pass
 
 
+class RealBanditAdapter(BanditAdapter):
+    """
+    Production adapter wrapping the real ContextualBandit from Module C
+    (cloud/decision_layer/bandit.py).
+
+    Interface mapping:
+    - decide()           → bandit.predict(event_dict, event_id) -> BanditDecisionOutput
+    - submit_feedback()  → bandit.update(event_id, feedback_str)
+    - get_zone_thresholds() → derived from bandit.thresholds registry
+
+    The bandit is pre-warmed with the offline baseline policy (policy_v1) at
+    construction time using the same seed dataset as train_baseline.py, so it
+    starts with a real trained state rather than a cold identity matrix.
+    """
+
+    def __init__(self):
+        from cloud.decision_layer.bandit import ContextualBandit
+        from cloud.decision_layer.train_baseline import generate_seed_dataset
+
+        self.bandit = ContextualBandit(strategy="linucb", policy_version="policy_v0")
+        training_batch, validation_set = generate_seed_dataset()
+        self.bandit.retrain(
+            training_batch=training_batch,
+            validation_set=validation_set,
+            min_validation_score=0.60,
+        )
+
+    def _to_bandit_dict(self, event: DetectionEventCreate) -> Dict:
+        """
+        Convert Pydantic DetectionEventCreate to the plain dict the bandit expects.
+        Key remapping: Pydantic stores 'class' as 'class_name' internally (due to
+        Python keyword clash) but bandit.extract_features() reads the 'class' key.
+        """
+        return {
+            "camera_id": event.camera_id,
+            "zone_id": event.zone_id,
+            "event_type": event.event_type,
+            "class": event.class_name,        # Pydantic alias: stored as class_name, bandit reads "class"
+            "confidence": event.confidence,
+            "tracked_id": event.tracked_id,
+            "timestamp": event.timestamp,
+            "frame_count_triggered": event.frame_count_triggered,
+            "clip_captured": event.clip_captured,
+        }
+
+    _event_to_dict = _to_bandit_dict
+
+    def decide(self, event: DetectionEventCreate, event_id: str) -> BanditDecisionOutput:
+        """Pass event through the real ContextualBandit and return decision."""
+        event_dict = self._to_bandit_dict(event)
+        decision = self.bandit.predict(event_dict, event_id=event_id)
+        return BanditDecisionOutput(
+            event_id=decision["event_id"],
+            action=decision["action"],
+            policy_version=decision["policy_version"],
+            threshold_used=decision["threshold_used"],
+        )
+
+    def submit_feedback(self, feedback: OperatorFeedbackCreate) -> None:
+        """Forward operator feedback to the real bandit's online update step."""
+        self.bandit.update(feedback.event_id, feedback.feedback)
+
+    def get_zone_thresholds(self) -> Dict[str, float]:
+        """
+        Return the bandit's current per-camera/zone threshold registry.
+        Keys in bandit.thresholds are "camera_id:zone_id"; we return them as-is
+        plus 'default', 'zone_a', 'zone_b' fallbacks.
+        """
+        from cloud.decision_layer.bandit import DEFAULT_THRESHOLD
+        thresholds = dict(self.bandit.thresholds)
+        if "default" not in thresholds:
+            thresholds["default"] = DEFAULT_THRESHOLD
+        if "zone_a" not in thresholds:
+            thresholds["zone_a"] = self.bandit.get_threshold("default_cam", "zone_a")
+        if "zone_b" not in thresholds:
+            thresholds["zone_b"] = self.bandit.get_threshold("default_cam", "zone_b")
+        return thresholds
+
+
 class MockBanditAdapter(BanditAdapter):
     """
     Mock decision adapter with simulated threshold adjustment logic.
-    TODO: Replace with real Module C integration when available.
+    Retained for reference and testing. Not used in production — see get_bandit_adapter().
     """
 
     def __init__(self):
         self.policy_version = "v1.0.0-mock"
-        # Dynamic per-zone thresholds
         self.zone_thresholds: Dict[str, float] = {
             "zone_a": 0.70,
             "zone_b": 0.75,
@@ -49,12 +130,7 @@ class MockBanditAdapter(BanditAdapter):
 
     def decide(self, event: DetectionEventCreate, event_id: str) -> BanditDecisionOutput:
         threshold = self._get_threshold(event.zone_id)
-        # Simple mock logic: escalate if confidence >= zone threshold, else log_only
-        if event.confidence >= threshold:
-            action = "escalate"
-        else:
-            action = "log_only"
-
+        action = "escalate" if event.confidence >= threshold else "log_only"
         return BanditDecisionOutput(
             event_id=event_id,
             action=action,
@@ -63,12 +139,6 @@ class MockBanditAdapter(BanditAdapter):
         )
 
     def submit_feedback(self, feedback: OperatorFeedbackCreate) -> None:
-        """
-        Mock reward update:
-        - Confirmed alert -> Lower threshold slightly (increases sensitivity)
-        - False alarm -> Raise threshold slightly (reduces false alerts)
-        """
-        # We simulate nudging default threshold or specific zones if trackable
         if feedback.feedback == "confirmed":
             for zone in self.zone_thresholds:
                 self.zone_thresholds[zone] = max(0.40, round(self.zone_thresholds[zone] - 0.02, 3))
@@ -80,8 +150,10 @@ class MockBanditAdapter(BanditAdapter):
         return self.zone_thresholds.copy()
 
 
-# Singleton instance for mock adapter across requests
-_bandit_adapter_instance: BanditAdapter = MockBanditAdapter()
+# ── Active adapter ──────────────────────────────────────────────────────────
+# RealBanditAdapter is the live production adapter (wired 2026-09-22).
+# To revert to mock for isolated testing, swap to MockBanditAdapter() here.
+_bandit_adapter_instance: BanditAdapter = RealBanditAdapter()
 
 
 def get_bandit_adapter() -> BanditAdapter:

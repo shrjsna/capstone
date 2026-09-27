@@ -159,3 +159,50 @@ venv\Scripts\activate
 The test suite uses an in-memory SQLite DB. The live server creates
 `cloud_backend.db` on disk. Stale data in the on-disk DB can cause confusion.
 Delete `cloud_backend.db` and restart to get a clean state.
+
+---
+
+## Live Stream (NEW)
+
+### Stream starts but video is black / blank in the dashboard
+- The model weights file is missing. Confirm: `dir edge\ppe_detection\models\ppe_final_v4.pt`
+- The source couldn't be read: try `venv\Scripts\python.exe -c "import cv2; cap=cv2.VideoCapture(0); print(cap.isOpened())"` to confirm cv2 can access the camera.
+
+### `Could not open source: 'rtsp://...'` error when starting stream
+The RTSP URL is wrong or the camera isn't broadcasting.
+Fix: verify the URL in VLC first: Media → Open Network Stream → paste the RTSP URL.
+Common mistakes: wrong port (try 554, 8554), wrong path (/stream1 vs /live), camera not powered on.
+
+### Stream starts but immediately shows error "Stream disconnected"
+- Source video file ended — the stream manager loops video files automatically, but if the file is corrupt or the path is wrong it will stop.
+- Backend process crashed — check the uvicorn terminal for Python tracebacks.
+- Port 8000 conflict — another process is using port 8000.
+
+### `POST /stream/start` returns 422 Unprocessable Entity
+The request body has an invalid `mode` value. Only `"ppe"` and `"zone_intrusion"` are accepted.
+
+### MJPEG stream works in Chrome but not in Firefox/Safari
+Firefox handles `multipart/x-mixed-replace` correctly. Safari on iOS may block it over HTTP (not HTTPS). Use `GET /stream/latest-frame` as a fallback by setting the img src to that endpoint and refreshing via JavaScript.
+
+### Cannot connect to backend from phone browser
+- The backend must be started with `--host 0.0.0.0` (not `127.0.0.1`).
+- The phone must be on the same WiFi network as the laptop.
+- Confirm with: `curl http://<laptop-ip>:8000/health` from a second laptop terminal.
+
+---
+
+## Zone Draw Tool (NEW)
+
+### "Capture Frame" returns 422
+Source cannot be opened. Same fix as "Could not open source" above.
+
+### Zone polygon coordinates look wrong after saving
+Coordinates are stored in native image pixels (scaled back from canvas display size). If the frame resolution changes between capture and deployment, the polygon will be in the wrong position. Always re-capture and re-draw the zone if the camera resolution changes.
+
+### Zone saved via dashboard doesn't appear in `zone_intrusion_pipeline.py` output
+The pipeline uses the `--zone_config` argument to specify the zone file path. After saving via the dashboard, the file is in `edge/zone_intrusion/zones/<camera_id>_<zone_id>.json`. Pass this path explicitly:
+```
+venv\Scripts\python.exe -m edge.zone_intrusion.tracking.zone_intrusion_pipeline \
+  --source 0 \
+  --zone_config edge/zone_intrusion/zones/cam_01_zone_red_1.json
+```

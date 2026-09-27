@@ -92,6 +92,17 @@ python edge/ppe_detection/train.py --resume --name ppe_yolov11n
 
 ### C. Inference & Event Generation (`infer.py`)
 
+`cv2.VideoCapture` (used internally by the YOLO `.track()` call) transparently
+accepts any of these — pass whichever value matches your hardware to `--source`:
+
+| Source type | `--source` value | Example |
+|---|---|---|
+| Laptop webcam | Integer index | `--source 0` |
+| Second USB camera | Integer index | `--source 1` |
+| Local video/image file | File path | `--source path/to/video.mp4` |
+| RTSP/CCTV camera | RTSP URL | `--source rtsp://192.168.1.50:554/stream1` |
+| IP webcam app (MJPEG) | HTTP URL | `--source http://192.168.1.10:8080/video` |
+
 Run on live webcam (camera index 0):
 ```bash
 python edge/ppe_detection/infer.py \
@@ -110,6 +121,28 @@ python edge/ppe_detection/infer.py \
     --debounce 3 \
     --output-log events_log.jsonl \
     --api-url http://localhost:8000/events
+```
+
+Run on an RTSP/CCTV camera stream:
+```bash
+python edge/ppe_detection/infer.py \
+    --model edge/ppe_detection/models/ppe_final_v4.pt \
+    --source rtsp://192.168.1.50:554/stream1 \
+    --camera-id cam_factory_01 \
+    --zone-id zone_A \
+    --debounce 3 \
+    --api-url http://127.0.0.1:8000/events
+```
+
+Run on a phone IP-camera app stream:
+```bash
+python edge/ppe_detection/infer.py \
+    --model edge/ppe_detection/models/ppe_final_v4.pt \
+    --source http://192.168.1.25:8080/video \
+    --camera-id cam_phone_01 \
+    --zone-id zone_A \
+    --debounce 3 \
+    --api-url http://127.0.0.1:8000/events
 ```
 
 CLI Parameters:

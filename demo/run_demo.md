@@ -122,22 +122,23 @@ decision.
 
 ## Step 4 — Zone Intrusion: Module B (Terminal 3, same terminal)
 
-### Option A — Video file (preferred if available)
+### Option A — Video file (verified real execution)
 ```bash
 python -m edge.zone_intrusion.tracking.zone_intrusion_pipeline \
     --source demo/videos/zone_intrusion_demo.mp4 \
     --zone_config edge/zone_intrusion/zones/camera_01_zones.json \
     --debounce_frames 4 \
-    --events_log demo/zone_intrusion_events.jsonl
+    --events_log demo/zone_intrusion_events.jsonl \
+    --api-url http://127.0.0.1:8000/events
 ```
-*Note: This does NOT have an `--api-url` flag — Module B logs to JSONL. To get
-it into the dashboard for the demo, use Option B in parallel or afterwards.*
+*What this proves: Person detection + ByteTrack tracking + polygon zone-check fires
+after 4 consecutive frames in the polygon. Events are logged locally to JSONL, blurred
+clips are saved to `clips/`, and events are POSTed directly to the backend over HTTP.*
 
-*What to point at: the terminal prints `EVENT FIRED:` with a JSON object matching
-`INTERFACES.md` schema exactly — same `event_type`, `confidence`, `tracked_id`,
-`timestamp` fields.*
+*What to point at: The terminal prints `EVENT FIRED:` with the INTERFACES.md schema,
+and the zone intrusion event appears in the live dashboard feed within 2 seconds.*
 
-### Option B — Dashboard inject button (fallback, or use to show it in the feed)
+### Option B — Dashboard inject button (instant fallback)
 In the browser at `http://localhost:8080`, click **"+ Zone Intrusion"**.
 This calls `POST /events` directly with a realistic zone_intrusion payload.
 The bandit makes a real decision and the event appears in the feed immediately.
@@ -272,3 +273,83 @@ alerts.
 | **Total** | **~9–11 min** |
 
 *Timing verified 2026-09-23: federation 2 rounds ran in 15.48s once both clients connected.*
+
+---
+
+## Step 8 — Live Stream Mode (NEW — AEGIS Dashboard Live Stream tab)
+
+The dashboard now has a **Live Stream** tab that shows continuous annotated video
+directly in the browser — no terminal window needed for the visual feed.
+
+### Start the dashboard (if not already running):
+```
+venv\Scripts\python.exe -m http.server 8080 --directory dashboard --bind 0.0.0.0
+```
+Note: `--bind 0.0.0.0` makes it reachable from a phone on the same WiFi.
+
+### Use the Live Stream tab:
+1. Click the **Live Stream** tab in the dashboard.
+2. Under **Source Type**, select: **Webcam** (index `0`), **CCTV / IP Camera** (RTSP URL), or **Video File**.
+3. Select **Detection Mode**: PPE Detection or Zone Intrusion.
+4. Click **Start Stream**.
+5. The annotated video feed appears in the right panel. Violations automatically appear in the Alert Feed tab.
+6. Click **Stop Stream** when done.
+
+### RTSP / CCTV camera:
+Select "CCTV / IP Camera" and enter the full URL:
+```
+rtsp://192.168.1.50:554/stream1
+```
+
+### Phone as camera via IP Webcam app (Android):
+Install **IP Webcam** by Pavel Khlebovich, start the server in the app.
+Select "CCTV / IP Camera" in the dashboard and enter:
+```
+http://192.168.x.x:8080/video
+```
+(replace with the IP shown in the app)
+
+### Phone's own browser accessing the dashboard:
+Find your laptop's LAN IP: `ipconfig` → look for "IPv4 Address" (e.g. `192.168.1.42`)
+On the phone (same WiFi), open: `http://192.168.1.42:8080`
+The dashboard auto-detects the host and connects to `http://192.168.1.42:8000` automatically.
+
+---
+
+## Step 9 — Draw Zone (NEW — AEGIS Dashboard Draw Zone tab)
+
+Create a restricted-zone polygon directly from a camera frame — no separate script needed.
+
+1. Click the **Draw Zone** tab.
+2. Enter the camera source in the "Camera Source" field (e.g. `0` for webcam).
+3. Click **Capture Frame** — a still frame appears on the canvas.
+4. Click directly on the image to add polygon points. Points connect with lines.
+5. Enter **Camera ID** and **Zone ID**.
+6. Click **Save Zone**.
+7. The zone appears in "Saved Zones" and is immediately available in the Live Stream tab.
+
+Zones saved here are stored in the exact same format as the CLI tool and are 
+interchangeable with `edge/zone_intrusion/zones/*.json`.
+
+---
+
+## Live Webcam Cheat-Sheet (updated)
+
+| Demo step | Command / action |
+|---|---|
+| PPE detection (image) | `python edge/ppe_detection/infer.py --source "demo/images/..." --debounce 1 --api-url http://127.0.0.1:8000/events` |
+| PPE detection (live webcam) | Same, `--source 0` |
+| PPE detection (RTSP) | Same, `--source rtsp://192.168.1.50:554/stream1` |
+| Zone intrusion (video) | `python -m edge.zone_intrusion.tracking.zone_intrusion_pipeline --source demo/videos/... --api-url http://127.0.0.1:8000/events` |
+| Zone intrusion (webcam) | Same, `--source 0` |
+| Zone intrusion (RTSP) | Same, `--source rtsp://...` |
+| Live annotated stream | Dashboard → Live Stream tab → Start Stream |
+| Draw zone | Dashboard → Draw Zone tab → Capture Frame → click points → Save |
+| Feedback | Dashboard → Alert Feed tab → Confirm / False Alarm buttons |
+| Federation | See Step 7 above |
+
+**Test your camera index before presentation day:**
+```
+venv\Scripts\python.exe edge/ppe_detection/infer.py --model edge/ppe_detection/models/ppe_final_v4.pt --source 0 --show
+```
+If the wrong camera opens, try `--source 1`.

@@ -1,0 +1,38 @@
+[
+  {
+    "filename": "demo_no_gloves_01_conf84.jpg",
+    "class": "no_gloves",
+    "confidence": 0.8466,
+    "source": "ppe_0441_jpg.rf.5090a5e931792be223a3d4907d3dd462.jpg"
+  },
+  {
+    "filename": "demo_no_gloves_02_conf78.jpg",
+    "class": "no_gloves",
+    "confidence": 0.7802,
+    "source": "ppe_0015_jpg.rf.60805dc32dc7dad6dcd5d1c419f29916.jpg"
+  },
+  {
+    "filename": "demo_no_vest_01_conf96.jpg",
+    "class": "no_vest",
+    "confidence": 0.963,
+    "source": "construction-267-_jpg.rf.135059c5958ba7ec6a9c69e38061686d.jpg"
+  },
+  {
+    "filename": "demo_no_vest_02_conf95.jpg",
+    "class": "no_vest",
+    "confidence": 0.9503,
+    "source": "construction-1115-_jpg.rf.ecb6fd4ad843697300c2e88c3eecdcdf.jpg"
+  },
+  {
+    "filename": "demo_no_helmet_01_conf92.jpg",
+    "class": "no_helmet",
+    "confidence": 0.9214,
+    "source": "construction-999-_jpg.rf.53e15e90cbea9d47feb901ee2c268c65.jpg"
+  },
+  {
+    "filename": "demo_no_helmet_02_conf88.jpg",
+    "class": "no_helmet",
+    "confidence": 0.8846,
+    "source": "construction-4-_mp4-188_jpg.rf.f75fc26e6d3c56b79b0c844a28b8a27f.jpg"
+  }
+]

@@ -29,7 +29,9 @@ except (ImportError, ValueError):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=str, required=True)
+    parser.add_argument("--source", type=str, required=True,
+                        help="Video source: webcam index (0), file path, or RTSP/HTTP URL "
+                             "(e.g. rtsp://192.168.1.50:554/stream1 or http://192.168.1.10:8080/video)")
     parser.add_argument("--model", type=str, default="yolo11n.pt")
     parser.add_argument("--zone_config", type=str,
                          default="../zones/camera_01_zones.json")
@@ -40,6 +42,18 @@ def parse_args():
                          help="Folder to save captured clips into")
     parser.add_argument("--source_fps", type=float, default=15.0,
                          help="Approximate fps of the incoming stream, used to size the rolling buffer")
+    parser.add_argument("--api-url", type=str, default=None,
+                        dest="api_url",
+                        help="Optional backend URL to POST fired zone-intrusion events to "
+                             "(e.g. http://127.0.0.1:8000/events). If omitted, events are "
+                             "written to --events_log only.")
+    parser.add_argument("--camera-id", type=str, default=None,
+                        dest="camera_id",
+                        help="Override the camera_id emitted in events (defaults to the "
+                             "zone config's camera_id field).")
+    parser.add_argument("--no-show", action="store_true", default=False,
+                        dest="no_show",
+                        help="Do not display cv2 GUI window (headless/demo mode).")
     return parser.parse_args()
 
 
@@ -50,6 +64,18 @@ def log_event(event, log_path):
     os.makedirs(os.path.dirname(log_path) or ".", exist_ok=True)
     with open(log_path, "a") as f:
         f.write(json.dumps(event) + "\n")
+
+
+def post_event(event, api_url):
+    """POST a detection event to the backend API. Non-blocking best-effort."""
+    try:
+        import requests
+        resp = requests.post(api_url, json=event, timeout=5)
+        resp.raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"[zone-pipeline] Failed to POST event to {api_url}: {exc}")
+        return False
 
 
 def build_event(camera_id, zone_id, track_id, confidence, frame_count_triggered):
@@ -74,6 +100,9 @@ def main():
     debouncer = DebounceTracker(required_frames=args.debounce_frames)
     model = YOLO(args.model)
 
+    # Use --camera-id override if provided, otherwise fall back to zone config's camera_id
+    camera_id = args.camera_id if args.camera_id else zone["camera_id"]
+
     os.makedirs(args.clips_dir, exist_ok=True)
 
     def on_clip_ready(event_id, frames):
@@ -88,8 +117,10 @@ def main():
     recorder = RollingClipRecorder(source_fps=args.source_fps,
                                     on_clip_ready=on_clip_ready)
 
-    print(f"Zone loaded: {zone['zone_id']} on {zone['camera_id']}")
+    print(f"Zone loaded: {zone['zone_id']} on {camera_id}")
     print(f"Debounce: {args.debounce_frames} consecutive frames required")
+    if args.api_url:
+        print(f"Events will be POSTed to: {args.api_url}")
     print("Press 'q' in the video window to quit.\n")
 
     # Draw the zone polygon on every frame so you can SEE it overlaid on the
@@ -137,7 +168,7 @@ def main():
 
                 if fired:
                     event = build_event(
-                        camera_id=zone["camera_id"],
+                        camera_id=camera_id,
                         zone_id=zone["zone_id"],
                         track_id=tid,
                         confidence=conf,
@@ -147,15 +178,19 @@ def main():
                     print(json.dumps(event, indent=2))
                     print()
                     log_event(event, args.events_log)
+                    if args.api_url:
+                        post_event(event, args.api_url)
 
                     event_id = f"{event['tracked_id']}_{event['timestamp'].replace(':', '-')}"
                     recorder.trigger(event_id)
 
-        cv2.imshow("Module B - Zone Intrusion Pipeline", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
+        if not args.no_show:
+            cv2.imshow("Module B - Zone Intrusion Pipeline", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
 
-    cv2.destroyAllWindows()
+    if not args.no_show:
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
