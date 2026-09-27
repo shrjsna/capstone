@@ -107,6 +107,28 @@ MockBanditAdapter is retained in the file for isolated unit-test use only.
 Key mapping: Pydantic stores JSON "class" as .class_name; _to_bandit_dict() remaps
 it back to "class" before calling bandit.extract_features().
 
+## 2026-09-27 — Live stream architecture: MJPEG over polling fallback
+Decided: expose the live annotated camera feed via `GET /stream/mjpeg` using
+`multipart/x-mixed-replace` with boundary `aegisframe`, with `GET /stream/latest-frame`
+as a single-JPEG polling fallback.
+Why: MJPEG via multipart is universally supported in all major browsers via a plain
+`<img src="...">` tag — zero frontend video decoding complexity, no WebRTC, no WebSocket.
+The polling fallback (`latest-frame`) is provided for environments where MJPEG streams
+are blocked (some corporate proxies strip multipart responses). FastAPI's `StreamingResponse`
+with a generator handles the MJPEG boundary encoding server-side. The background inference
+thread reuses `DebounceTracker` and `build_event`/`post_event` from `edge/ppe_detection/infer.py`
+directly — no duplicate debounce logic. Stream events are forwarded to `POST /events` so they
+appear in the alert feed and trigger bandit decisions normally.
+
+## 2026-09-27 — Zone config management via dashboard (POST /zones, GET /zones)
+Decided: dashboard zone drawing tool writes zone configs in the exact same JSON format
+as the standalone CLI workflow, stored in `edge/zone_intrusion/zones/`. No schema
+divergence between CLI-drawn and dashboard-drawn zones — both are read by
+`zone_check.load_zone_config()` identically.
+Why: ensures zones are interchangeable between the live demo (draw in dashboard) and
+the standalone pipeline script (`zone_intrusion_pipeline.py`). A separate schema
+would have created a split maintenance burden.
+
 ## 2026-09-23 — Final integration verification pass
 Decided: confirm all modules genuinely wired end-to-end; fix two integration bugs found.
 Why: pre-presentation verification required — not just "files exist" but live HTTP evidence.
@@ -119,12 +141,10 @@ DEPRECATED FEATURE warnings in the installed Flower version. Both still function
 for the 2-round demo. Recommend upgrading to flower-superlink/flower-supernode CLI before
 the next major milestone, but not a blocker for the capstone presentation.
 
-## 2026-09-22 — Real A/b matrix serialisation in cloud/federated/adapter.py
-Decided: upgrade PolicyWeightAdapter to serialise the full ContextualBandit A/b
-precision matrices (3 actions × (256 + 16) = 816 float64 values across 6 arrays)
-instead of the previous 5-element placeholder threshold vector.
-Why: the 5-element vector was a proxy that did not capture actual learned policy
-state, so FedAvg was averaging meaningless numbers. The real A/b matrices ARE the
-policy. Legacy dict_to_weights / weights_to_dict helpers are retained for the
-flower_client.py local-adaptation step which uses a simpler threshold-dict format.
-Privacy guarantee is unchanged: only numeric weight values cross site boundaries.
+## 2026-09-27 — Full end-to-end integration and RealBanditAdapter activation
+Decided: verify and finalize live production wiring of RealBanditAdapter in cloud/backend/adapter.py
+and 6-array A/b precision matrix serialization in cloud/federated/adapter.py.
+Why: completes final capstone integration; all 112 tests passing across all 4 modules (Module A: PPE,
+Module B: Zone Intrusion, Module C: Contextual Bandit, Module D: Backend/Dashboard/Federated).
+Ensures zero mock paths in live demo while retaining MockBanditAdapter for isolated unit testing.
+

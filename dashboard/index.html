@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AEGIS — Collaborative AI Safety Operations Console</title>
-  <!-- Modern Industrial Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
   <!-- Top Navigation Header -->
   <header class="app-header">
     <div class="brand">
@@ -33,18 +33,33 @@
       </div>
       <div class="policy-badge">
         <span class="badge-title">POLICY</span>
-        <span id="header-policy-ver" class="badge-val">v1.0.0-mock</span>
+        <span id="header-policy-ver" class="badge-val">v1.0.0</span>
       </div>
       <div class="backend-url-selector">
-        <input type="text" id="api-url-input" value="http://127.0.0.1:8000" placeholder="Backend API URL">
+        <input type="text" id="api-url-input" placeholder="Backend API URL">
       </div>
     </div>
   </header>
 
-  <!-- Main Console Grid Layout -->
-  <main class="console-grid">
-    
-    <!-- Hero Centerpiece: Live Alert Feed -->
+  <!-- Tab Navigation -->
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="alerts">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      Alert Feed
+    </button>
+    <button class="tab-btn" data-tab="stream">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M20 12c-2.4 4-5.6 6-8 6s-5.6-2-8-6c2.4-4 5.6-6 8-6s5.6 2 8 6z"/></svg>
+      Live Stream
+    </button>
+    <button class="tab-btn" data-tab="zones">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+      Draw Zone
+    </button>
+  </nav>
+
+  <!-- ===== TAB: ALERT FEED ===== -->
+  <main class="console-grid tab-content active" id="tab-alerts">
+
     <section class="panel feed-panel">
       <div class="panel-header">
         <div class="panel-title-group">
@@ -64,82 +79,269 @@
           </div>
         </div>
       </div>
-
-      <!-- Feed Container -->
       <div id="alert-feed-container" class="feed-container">
-        <!-- Empty State -->
         <div class="feed-empty-state" id="feed-empty">
           <div class="empty-icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="m9 12 2 2 4-4"/>
-            </svg>
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
           </div>
           <h3>No Safety Alerts Detected</h3>
-          <p>Listening for edge detection events from Camera A and Camera B...</p>
+          <p>Listening for edge detection events...</p>
         </div>
       </div>
     </section>
 
-    <!-- Sidebar Right Panel: Policy & Threshold Monitor -->
     <aside class="panel side-panel">
-      <!-- Zone Threshold Monitor -->
       <div class="sub-panel">
         <div class="panel-header compact">
           <h3>Zone Sensitivity Thresholds</h3>
           <span class="info-tag">Human-in-the-Loop</span>
         </div>
-        <p class="panel-desc">Thresholds automatically calibrate as operators confirm or reject alerts.</p>
-        
-        <div id="thresholds-container" class="thresholds-list">
-          <!-- Zone threshold meters dynamically injected -->
-          <div class="threshold-card">
-            <div class="t-head">
-              <span class="t-zone">zone_a</span>
-              <span class="t-val" id="t-val-zone_a">0.70</span>
-            </div>
-            <div class="meter-bar">
-              <div class="meter-fill" id="t-fill-zone_a" style="width: 70%;"></div>
-            </div>
-          </div>
-          <div class="threshold-card">
-            <div class="t-head">
-              <span class="t-zone">zone_b</span>
-              <span class="t-val" id="t-val-zone_b">0.75</span>
-            </div>
-            <div class="meter-bar">
-              <div class="meter-fill" id="t-fill-zone_b" style="width: 75%;"></div>
-            </div>
-          </div>
-        </div>
+        <p class="panel-desc">Thresholds auto-calibrate as operators confirm or reject alerts.</p>
+        <div id="thresholds-container" class="thresholds-list"></div>
       </div>
 
-      <!-- Policy Versioning Log -->
       <div class="sub-panel margin-top">
-        <div class="panel-header compact">
-          <h3>Policy Evolution History</h3>
-        </div>
-        <div id="policy-history-list" class="history-list">
-          <!-- Policy history items dynamically injected -->
-        </div>
+        <div class="panel-header compact"><h3>Policy Evolution History</h3></div>
+        <div id="policy-history-list" class="history-list"></div>
       </div>
 
-      <!-- Quick Demo Trigger Panel -->
       <div class="sub-panel margin-top demo-box">
-        <div class="panel-header compact">
-          <h3>Simulate Edge Detection</h3>
-        </div>
-        <p class="panel-desc">POST synthetic events to test backend decisioning & UI feedback loops.</p>
+        <div class="panel-header compact"><h3>Simulate Edge Detection</h3></div>
+        <p class="panel-desc">POST synthetic events to test backend decisioning.</p>
         <div class="demo-btn-grid">
-          <button id="btn-sim-ppe" class="btn-demo ppe">
-            + PPE Violation
-          </button>
-          <button id="btn-sim-zone" class="btn-demo zone">
-            + Zone Intrusion
-          </button>
+          <button id="btn-sim-ppe" class="btn-demo ppe">+ PPE Violation</button>
+          <button id="btn-sim-zone" class="btn-demo zone">+ Zone Intrusion</button>
         </div>
       </div>
     </aside>
+  </main>
+
+  <!-- ===== TAB: LIVE STREAM ===== -->
+  <main class="stream-layout tab-content" id="tab-stream">
+
+    <!-- Left: controls -->
+    <aside class="panel stream-controls-panel">
+      <div class="panel-header compact">
+        <h3>Live Source Configuration</h3>
+        <span id="stream-status-badge" class="stream-badge stopped">STOPPED</span>
+      </div>
+
+      <!-- Source type selector -->
+      <div class="form-group">
+        <label class="form-label">Source Type</label>
+        <div class="seg-control" id="source-type-seg">
+          <button class="seg-btn active" data-val="webcam">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M20.2 6c-.8-1.6-2.6-2-4.2-2H8C6.4 4 4.6 4.4 3.8 6 3 7.4 3 9.1 3 12s0 4.6.8 6c.8 1.6 2.6 2 4.2 2h8c1.6 0 3.4-.4 4.2-2 .8-1.4.8-3.1.8-6s0-4.6-.8-6z"/></svg>
+            Webcam
+          </button>
+          <button class="seg-btn" data-val="rtsp">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            CCTV / IP Camera
+          </button>
+          <button class="seg-btn" data-val="file">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Video File
+          </button>
+        </div>
+      </div>
+
+      <!-- Source input (changes based on type) -->
+      <div class="form-group" id="source-input-group">
+        <label class="form-label" id="source-input-label">Camera Index</label>
+        <input type="text" id="stream-source-input" class="form-input" value="0" placeholder="0">
+        <p id="source-hint" class="form-hint">Enter 0 for default webcam, 1 for external USB camera.</p>
+      </div>
+
+      <!-- Detection mode -->
+      <div class="form-group">
+        <label class="form-label">Detection Mode</label>
+        <div class="seg-control" id="mode-seg">
+          <button class="seg-btn active" data-val="ppe">PPE Detection</button>
+          <button class="seg-btn" data-val="zone_intrusion">Zone Intrusion</button>
+        </div>
+      </div>
+
+      <!-- Zone config (only shown in zone_intrusion mode) -->
+      <div class="form-group" id="zone-config-group" style="display:none;">
+        <label class="form-label">Zone Config</label>
+        <select id="stream-zone-select" class="form-input">
+          <option value="">Loading zones...</option>
+        </select>
+        <p class="form-hint">Choose a saved zone. Create one in the Draw Zone tab.</p>
+      </div>
+
+      <!-- Camera / Zone IDs -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Camera ID</label>
+          <input type="text" id="stream-camera-id" class="form-input" value="stream_cam_01" placeholder="cam_01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Zone ID</label>
+          <input type="text" id="stream-zone-id" class="form-input" value="zone_A" placeholder="zone_A">
+        </div>
+      </div>
+
+      <!-- Advanced -->
+      <details class="form-advanced">
+        <summary class="form-label" style="cursor:pointer;">Advanced Settings</summary>
+        <div class="form-row" style="margin-top:8px;">
+          <div class="form-group">
+            <label class="form-label">Debounce Frames</label>
+            <input type="number" id="stream-debounce" class="form-input" value="3" min="1" max="30">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confidence</label>
+            <input type="number" id="stream-conf" class="form-input" value="0.25" min="0.05" max="0.99" step="0.05">
+          </div>
+        </div>
+      </details>
+
+      <!-- Start / Stop buttons -->
+      <div class="stream-btn-row">
+        <button id="btn-stream-start" class="btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Start Stream
+        </button>
+        <button id="btn-stream-stop" class="btn-secondary" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+          Stop Stream
+        </button>
+      </div>
+
+      <!-- Error display -->
+      <div id="stream-error-box" class="stream-error" style="display:none;"></div>
+
+      <!-- Status info -->
+      <div id="stream-info" class="stream-info" style="display:none;">
+        <div class="info-row"><span class="info-key">Source:</span><span id="info-source" class="info-val">—</span></div>
+        <div class="info-row"><span class="info-key">Mode:</span><span id="info-mode" class="info-val">—</span></div>
+        <div class="info-row"><span class="info-key">Events sent to alert feed automatically</span></div>
+      </div>
+
+      <!-- Phone camera note -->
+      <div class="phone-note">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span><strong>Phone camera?</strong> Use CCTV mode with your IP Webcam app URL (e.g. <code>http://192.168.x.x:8080/video</code>), or open this dashboard on the phone's browser directly.</span>
+      </div>
+    </aside>
+
+    <!-- Right: live feed display -->
+    <section class="panel stream-feed-panel">
+      <div class="panel-header compact">
+        <h3>Live Annotated Feed</h3>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="stream-live-dot" class="stream-live-indicator offline"></span>
+          <span id="stream-live-label" style="font-size:11px;color:var(--text-dim);">Not streaming</span>
+        </div>
+      </div>
+
+      <div class="stream-viewport" id="stream-viewport">
+        <div class="stream-placeholder" id="stream-placeholder">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2"/><path d="M20 12c-2.4 4-5.6 6-8 6s-5.6-2-8-6c2.4-4 5.6-6 8-6s5.6 2 8 6z"/></svg>
+          <p>Configure a source and click <strong>Start Stream</strong></p>
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">Annotated video will appear here. PPE violations and zone intrusions are forwarded to the Alert Feed automatically.</p>
+        </div>
+        <!-- The MJPEG image — hidden until streaming starts -->
+        <img id="stream-img" class="stream-img" src="" alt="Live annotated stream" style="display:none;" crossorigin="anonymous">
+      </div>
+
+      <!-- Recent stream events (from the alert feed, filtered to stream camera) -->
+      <div class="stream-events-row">
+        <span style="font-size:11px;color:var(--text-dim);">Recent events from this stream appear in the Alert Feed tab and here:</span>
+        <div id="stream-recent-events" class="stream-recent-events"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== TAB: DRAW ZONE ===== -->
+  <main class="zone-layout tab-content" id="tab-zones">
+
+    <!-- Left: controls -->
+    <aside class="panel zone-controls-panel">
+      <div class="panel-header compact">
+        <h3>Draw Restricted Zone</h3>
+      </div>
+      <p class="panel-desc">Capture a still frame from your camera, then click on it to define a restricted-zone polygon. Saved zones are used by both the live stream and the standalone pipeline script.</p>
+
+      <!-- Source for capture -->
+      <div class="form-group">
+        <label class="form-label">Camera Source (for frame capture)</label>
+        <input type="text" id="zone-capture-source" class="form-input" value="0" placeholder="0 | rtsp://... | path/to/video.mp4">
+        <p class="form-hint">Same format as Live Stream. Use 0 for webcam.</p>
+      </div>
+
+      <button id="btn-capture-frame" class="btn-secondary" style="width:100%;margin-bottom:12px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        Capture Frame
+      </button>
+
+      <!-- Zone metadata -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Camera ID</label>
+          <input type="text" id="zone-camera-id" class="form-input" value="cam_01" placeholder="cam_01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Zone ID</label>
+          <input type="text" id="zone-zone-id" class="form-input" value="zone_red_1" placeholder="zone_red_1">
+        </div>
+      </div>
+
+      <!-- Drawing controls -->
+      <div class="zone-draw-controls">
+        <div class="zone-point-count">
+          <span class="form-label">Points:</span>
+          <span id="zone-point-count" class="badge-val">0</span>
+          <span style="font-size:11px;color:var(--text-dim);">(min 3)</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button id="btn-zone-undo" class="btn-icon" title="Undo last point" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+          </button>
+          <button id="btn-zone-clear" class="btn-icon" title="Clear all points" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <button id="btn-zone-save" class="btn-primary" style="width:100%;margin-top:4px;" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save Zone
+      </button>
+
+      <div id="zone-save-result" class="zone-save-result" style="display:none;"></div>
+
+      <!-- Saved zones list -->
+      <div class="sub-panel margin-top" style="flex:1;overflow-y:auto;">
+        <div class="panel-header compact">
+          <h3>Saved Zones</h3>
+          <button id="btn-refresh-zones" class="btn-icon" title="Refresh list">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+          </button>
+        </div>
+        <div id="zones-list" class="zones-list">
+          <p style="font-size:12px;color:var(--text-dim);">Loading...</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right: canvas drawing area -->
+    <section class="panel zone-canvas-panel">
+      <div class="panel-header compact">
+        <h3>Zone Polygon Editor</h3>
+        <span style="font-size:11px;color:var(--text-dim);">Click on the image to add polygon points</span>
+      </div>
+
+      <div class="canvas-container" id="canvas-container">
+        <div class="canvas-placeholder" id="canvas-placeholder">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <p>Capture a frame to begin drawing</p>
+        </div>
+        <canvas id="zone-canvas" style="display:none;cursor:crosshair;"></canvas>
+      </div>
+    </section>
 
   </main>
 
