@@ -75,13 +75,18 @@ def cleanup() -> None:
 
 
 def main():
-    port = 8000
-    host = "0.0.0.0"
+    from cloud.backend.config import get_settings
+    settings = get_settings()
+
+    port = settings.PORT
+    host = settings.HOST
     lan_ip = get_lan_ip()
 
     local_url = f"http://127.0.0.1:{port}"
     lan_url = f"http://{lan_ip}:{port}"
     health_url = f"http://127.0.0.1:{port}/health"
+
+    auth_display = f"ACTIVE ({settings.API_KEY[:4]}...)" if settings.AUTH_ENABLED else "DISABLED"
 
     banner = f"""
 ======================================================================
@@ -90,6 +95,8 @@ def main():
   Localhost URL:   {local_url}
   LAN / Phone URL: {lan_url}
   Health Check:    {health_url}
+  API Auth:        {auth_display}
+  Retention:       {settings.RETENTION_DAYS} days max / {settings.MAX_STORED_EVENTS} events cap
   Press Ctrl+C to shut down all processes cleanly.
 ======================================================================
 """
