@@ -45,6 +45,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusDot      = statusIndicator?.querySelector('.dot');
   const statusLabel    = statusIndicator?.querySelector('.status-label');
 
+  // Operator & Authentication Controls
+  const btnOperatorSettings = document.getElementById('btn-operator-settings');
+  const headerOperatorId = document.getElementById('header-operator-id');
+  const authModal = document.getElementById('auth-modal');
+  const btnCloseAuthModal = document.getElementById('btn-close-auth-modal');
+  const btnCancelAuth = document.getElementById('btn-cancel-auth');
+  const btnSaveAuth = document.getElementById('btn-save-auth');
+  const settingOperatorId = document.getElementById('setting-operator-id');
+  const settingApiKey = document.getElementById('setting-api-key');
+
+  // Secondary Alert Filters
+  const alertCamFilter = document.getElementById('alert-cam-filter');
+  const alertTimeFilter = document.getElementById('alert-time-filter');
+  const alertSearchInput = document.getElementById('alert-search-input');
+
   // Stream tab
   const sourceTypeSeg  = document.getElementById('source-type-seg');
   const modeSeg        = document.getElementById('mode-seg');
@@ -97,16 +112,71 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnRefreshZones = document.getElementById('btn-refresh-zones');
 
   // =========================================================================
-  // State
+  // State & Authentication
   // =========================================================================
-  let activeAlerts     = [];
-  let currentFilter    = 'all';
-  let feedbackMap      = new Map();
-  let isConnected      = true;
-  let activeSourceType = 'webcam';
-  let activeMode       = 'ppe';
-  let isStreaming      = false;
-  let streamCameraId   = 'stream_cam_01';
+  let activeAlerts      = [];
+  let currentFilter     = 'all';
+  let currentCamFilter  = 'all';
+  let currentTimeFilter = 'all';
+  let currentSearchQuery= '';
+  let feedbackMap       = new Map();
+  let isConnected       = true;
+  let activeSourceType  = 'webcam';
+  let activeMode        = 'ppe';
+  let isStreaming       = false;
+  let streamCameraId    = 'stream_cam_01';
+
+  // Operator & API Key Credentials
+  let operatorId = localStorage.getItem('aegis_operator_id') || 'op_admin';
+  let apiKey     = localStorage.getItem('aegis_api_key') || 'aegis-secret-key-2026';
+
+  if (headerOperatorId) headerOperatorId.textContent = operatorId;
+
+  function openAuthModal() {
+    if (!authModal) return;
+    if (settingOperatorId) settingOperatorId.value = operatorId;
+    if (settingApiKey) settingApiKey.value = apiKey;
+    authModal.style.display = 'flex';
+  }
+
+  function closeAuthModal() {
+    if (authModal) authModal.style.display = 'none';
+  }
+
+  btnOperatorSettings?.addEventListener('click', openAuthModal);
+  btnCloseAuthModal?.addEventListener('click', closeAuthModal);
+  btnCancelAuth?.addEventListener('click', closeAuthModal);
+
+  btnSaveAuth?.addEventListener('click', () => {
+    const newOp = (settingOperatorId?.value || '').trim() || 'op_admin';
+    const newKey = (settingApiKey?.value || '').trim() || 'aegis-secret-key-2026';
+    operatorId = newOp;
+    apiKey = newKey;
+    localStorage.setItem('aegis_operator_id', operatorId);
+    localStorage.setItem('aegis_api_key', apiKey);
+    if (headerOperatorId) headerOperatorId.textContent = operatorId;
+    closeAuthModal();
+    showToast(`Saved credentials for '${operatorId}'`, 'info');
+    fetchAlerts();
+  });
+
+  // Authenticated fetch wrapper injecting security headers
+  async function authFetch(url, options = {}) {
+    const headers = options.headers ? { ...options.headers } : {};
+    if (apiKey) {
+      headers['X-API-Key'] = apiKey;
+    }
+    if (operatorId) {
+      headers['X-Operator-ID'] = operatorId;
+    }
+    const mergedOptions = { ...options, headers };
+    const res = await fetch(url, mergedOptions);
+    if (res.status === 401) {
+      showToast('Authentication failed: Missing or invalid API key.', 'error');
+      openAuthModal();
+    }
+    return res;
+  }
 
   // Zone draw state
   let zonePoints       = [];            // [{x,y}] canvas-coordinate polygon points
@@ -125,7 +195,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // Dynamic API URL
   // =========================================================================
-  // Set default on load — phone on LAN automatically gets the right IP
   apiUrlInput.value = buildDefaultApiUrl();
 
   function getApiBase() {
@@ -203,12 +272,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   async function fetchAlerts() {
     try {
-      const r = await fetch(`${getApiBase()}/alerts?limit=50`);
+      const r = await authFetch(`${getApiBase()}/alerts?limit=100`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       if (!Array.isArray(data)) throw new Error('Expected array');
       activeAlerts = data;
       setStatus(true);
+      syncCameraFilterOptions();
       renderAlertFeed();
       updateStreamRecentEvents();
     } catch (e) {
@@ -217,9 +287,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function syncCameraFilterOptions() {
+    if (!alertCamFilter) return;
+    const currentVal = alertCamFilter.value;
+    const cameras = Array.from(new Set(activeAlerts.map(a => a.camera_id).filter(Boolean))).sort();
+    
+    // Preserve 'all' plus dynamic cameras
+    let html = '<option value="all">All Cameras</option>';
+    cameras.forEach(cam => {
+      html += `<option value="${cam}">${cam}</option>`;
+    });
+    alertCamFilter.innerHTML = html;
+    if (cameras.includes(currentVal)) {
+      alertCamFilter.value = currentVal;
+    } else {
+      alertCamFilter.value = 'all';
+    }
+  }
+
   async function fetchThresholds() {
     try {
-      const r = await fetch(`${getApiBase()}/thresholds`);
+      const r = await authFetch(`${getApiBase()}/thresholds`);
       if (!r.ok) return;
       renderThresholds(await r.json());
     } catch (_) {}
@@ -227,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchPolicyHistory() {
     try {
-      const r = await fetch(`${getApiBase()}/policy-history`);
+      const r = await authFetch(`${getApiBase()}/policy-history`);
       if (!r.ok) return;
       const h = await r.json();
       if (Array.isArray(h) && h.length > 0) headerPolicy.textContent = h[0].policy_version;
@@ -238,18 +326,46 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderAlertFeed() {
     if (!isConnected && activeAlerts.length === 0) { renderOffline(); return; }
 
-    const filtered = activeAlerts.filter(a =>
-      currentFilter === 'all' ? true : a.event_type === currentFilter
-    );
+    const now = Date.now();
+    const filtered = activeAlerts.filter(a => {
+      // 1. Event type filter
+      if (currentFilter !== 'all' && a.event_type !== currentFilter) return false;
+
+      // 2. Camera filter
+      if (currentCamFilter !== 'all' && a.camera_id !== currentCamFilter) return false;
+
+      // 3. Time window filter
+      if (currentTimeFilter !== 'all' && a.timestamp) {
+        const alertTime = new Date(a.timestamp).getTime();
+        const diffMinutes = (now - alertTime) / (1000 * 60);
+        if (currentTimeFilter === '15m' && diffMinutes > 15) return false;
+        if (currentTimeFilter === '1h' && diffMinutes > 60) return false;
+        if (currentTimeFilter === '24h' && diffMinutes > 1440) return false;
+      }
+
+      // 4. Keyword search filter
+      if (currentSearchQuery) {
+        const query = currentSearchQuery.toLowerCase();
+        const str = `${a.class || a.class_name || ''} ${a.zone_id || ''} ${a.camera_id || ''} ${a.tracked_id || ''}`.toLowerCase();
+        if (!str.includes(query)) return false;
+      }
+
+      return true;
+    });
+
     alertBadge.textContent = `${filtered.length} Alerts`;
 
     if (filtered.length === 0) {
       alertFeed.innerHTML = '';
-      alertFeed.appendChild(feedEmpty);
-      feedEmpty.style.display = 'block';
+      if (feedEmpty) {
+        feedEmpty.querySelector('h3').textContent = activeAlerts.length > 0 ? 'No Matching Alerts' : 'No Safety Alerts Detected';
+        feedEmpty.querySelector('p').textContent = activeAlerts.length > 0 ? 'Try changing your filter settings.' : 'Listening for edge detection events...';
+        feedEmpty.style.display = 'block';
+        alertFeed.appendChild(feedEmpty);
+      }
       return;
     }
-    feedEmpty.style.display = 'none';
+    if (feedEmpty) feedEmpty.style.display = 'none';
     alertFeed.innerHTML = '';
 
     filtered.forEach((alert, idx) => {
@@ -263,7 +379,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const typeLabel = isPpe ? 'PPE Violation' : (alert.event_type === 'zone_intrusion' ? 'Zone Intrusion' : 'Security Alert');
         const typeClass = isPpe ? 'type-ppe' : 'type-intrusion';
         const actionClass = alert.bandit_action === 'escalate' ? 'action-escalate' : 'action-log';
-        const fbState = feedbackMap.get(alert.event_id);
+        // Check persisted feedback from DB or local session cache
+        const fbState = alert.feedback || feedbackMap.get(alert.event_id);
         const rawClass = alert.class || alert.class_name || 'unknown';
         const dispClass = String(rawClass).replace(/_/g, ' ').toUpperCase();
 
@@ -285,10 +402,10 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="alert-actions">
             ${fbState ? `<div class="feedback-status-badge ${fbState}">${fbState === 'confirmed' ? '✓ CONFIRMED' : '✗ FALSE ALARM'}</div>` : `
-              <button class="btn-feedback btn-confirm" onclick="submitFeedback('${alert.event_id}','confirmed')">
+              <button class="btn-feedback btn-confirm" aria-label="Confirm alert" onclick="submitFeedback('${alert.event_id}','confirmed')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Confirm
               </button>
-              <button class="btn-feedback btn-false-alarm" onclick="submitFeedback('${alert.event_id}','false_alarm')">
+              <button class="btn-feedback btn-false-alarm" aria-label="Mark false alarm" onclick="submitFeedback('${alert.event_id}','false_alarm')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>False Alarm
               </button>`}
           </div>`;
@@ -298,6 +415,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // Filter event listeners
+  alertCamFilter?.addEventListener('change', () => {
+    currentCamFilter = alertCamFilter.value;
+    renderAlertFeed();
+  });
+
+  alertTimeFilter?.addEventListener('change', () => {
+    currentTimeFilter = alertTimeFilter.value;
+    renderAlertFeed();
+  });
+
+  alertSearchInput?.addEventListener('input', () => {
+    currentSearchQuery = alertSearchInput.value.trim();
+    renderAlertFeed();
+  });
 
   function renderThresholds(data) {
     if (!data || typeof data !== 'object') return;
@@ -331,13 +464,18 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       feedbackMap.set(eventId, fbType);
       renderAlertFeed();
-      const r = await fetch(`${getApiBase()}/feedback`, {
+      const r = await authFetch(`${getApiBase()}/feedback`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({event_id: eventId, feedback: fbType, operator_id: 'op_console_user', timestamp: new Date().toISOString()})
+        body: JSON.stringify({
+          event_id: eventId,
+          feedback: fbType,
+          operator_id: operatorId,
+          timestamp: new Date().toISOString()
+        })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      showToast(`Feedback '${fbType}' recorded`, 'info');
+      showToast(`Feedback '${fbType}' recorded by ${operatorId}`, 'info');
       fetchThresholds();
     } catch (e) {
       showToast(`Feedback failed: ${e.message}`, 'error');
@@ -363,13 +501,19 @@ document.addEventListener('DOMContentLoaded', () => {
       clip_captured: false
     };
     try {
-      const r = await fetch(`${getApiBase()}/events`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const r = await authFetch(`${getApiBase()}/events`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({detail: `HTTP ${r.status}`}));
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
       showToast(`Simulated ${isPpe ? 'PPE' : 'Zone'} event`, 'info');
       fetchAlerts();
     } catch (e) {
-      showToast(`Backend unreachable: ${e.message}`, 'error');
-      setStatus(false, e.message);
+      showToast(`Simulation failed: ${e.message}`, 'error');
     }
   }
 
@@ -415,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadZonesForStream() {
     try {
-      const r = await fetch(`${getApiBase()}/zones`);
+      const r = await authFetch(`${getApiBase()}/zones`);
       if (!r.ok) return;
       const zones = await r.json();
       streamZoneSelect.innerHTML = '';
@@ -458,7 +602,7 @@ document.addEventListener('DOMContentLoaded', () => {
     streamErrorBox.style.display = 'none';
 
     try {
-      const r = await fetch(`${getApiBase()}/stream/start`, {
+      const r = await authFetch(`${getApiBase()}/stream/start`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
@@ -481,7 +625,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btnStreamStop.disabled = false;
       btnStreamStart.textContent = 'Restart Stream';
       btnStreamStart.disabled = false;
-      showToast('Stream started', 'info');
+      showToast('Stream started successfully', 'info');
     } catch (e) {
       streamErrorBox.textContent = `Could not start stream: ${e.message}`;
       streamErrorBox.style.display = 'block';
@@ -492,8 +636,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   btnStreamStop.addEventListener('click', async () => {
+    if (isStreaming && !confirm('Are you sure you want to stop the active live stream?')) {
+      return;
+    }
     try {
-      await fetch(`${getApiBase()}/stream/stop`, {method: 'POST'});
+      await authFetch(`${getApiBase()}/stream/stop`, {method: 'POST'});
     } catch (_) {}
     stopStreamUI();
     showToast('Stream stopped', 'info');
@@ -672,7 +819,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCapture.textContent = 'Capturing…';
 
     try {
-      const r = await fetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
+      const r = await authFetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
       if (!r.ok) {
         const err = await r.json().catch(() => ({detail: `HTTP ${r.status}`}));
         throw new Error(err.detail || `HTTP ${r.status}`);
@@ -726,7 +873,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const grab = async () => {
           if (!isLivePreview) return;
           try {
-            const r = await fetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
+            const r = await authFetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
             if (!r.ok) return;
             const blob = await r.blob();
             const imgUrl = URL.createObjectURL(blob);
@@ -947,7 +1094,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
 
     try {
-      const r = await fetch(`${getApiBase()}/zones`, {
+      const r = await authFetch(`${getApiBase()}/zones`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -966,7 +1113,7 @@ document.addEventListener('DOMContentLoaded', () => {
       zoneSaveResult.style.display = 'block';
       zoneSaveResult.className = 'zone-save-result success';
       zoneSaveResult.innerHTML = `<strong>Zone saved:</strong> ${saved.filename}<br><span style="font-size:11px;color:var(--text-dim);">${saved.point_count} points · ${camId} / ${zoneId}</span>`;
-      showToast(`Zone '${zoneId}' saved`, 'info');
+      showToast(`Zone '${zoneId}' saved successfully`, 'info');
       loadZonesList();
       return saved;
     } catch (e) {
@@ -1040,7 +1187,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Saved zones list loader
   async function loadZonesList() {
     try {
-      const r = await fetch(`${getApiBase()}/zones`);
+      const r = await authFetch(`${getApiBase()}/zones`);
       if (!r.ok) { zonesList.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">Could not load zones.</p>'; return; }
       const zones = await r.json();
       zonesList.innerHTML = '';
@@ -1064,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="btn-zone-action-detect" title="Run live intrusion detection" data-file="${z.file_path}" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
               ▶ Detect
             </button>
-            <button class="btn-icon zone-delete-btn" title="Delete zone" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
+            <button class="btn-icon zone-delete-btn" title="Delete zone" aria-label="Delete zone" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
               </svg>
@@ -1078,6 +1225,10 @@ document.addEventListener('DOMContentLoaded', () => {
           const zone = e.currentTarget.getAttribute('data-zone');
           try {
             const poly = JSON.parse(polyStr);
+            if (!Array.isArray(poly) || poly.length === 0) {
+              showToast('No polygon coordinates stored in this zone file.', 'error');
+              return;
+            }
             const scale = zoneCanvas._scale || 1;
             zonePoints = poly.map(pt => ({
               x: Math.round(pt[0] * scale),
@@ -1087,7 +1238,7 @@ document.addEventListener('DOMContentLoaded', () => {
             zoneZoneId.value = zone;
             updatePointCountUI();
             redrawCanvas();
-            showToast(`Loaded zone '${zone}' onto canvas`, 'info');
+            showToast(`Loaded zone '${zone}' (${poly.length} pts) onto canvas`, 'info');
           } catch (err) {
             showToast('Could not load polygon coordinates', 'error');
           }
@@ -1127,13 +1278,15 @@ document.addEventListener('DOMContentLoaded', () => {
           }, 300);
         });
 
-        // Delete zone
+        // Delete zone with confirmation
         el.querySelector('.zone-delete-btn').addEventListener('click', async e => {
           const cam  = e.currentTarget.getAttribute('data-cam');
           const zone = e.currentTarget.getAttribute('data-zone');
-          if (!confirm(`Delete zone '${zone}' on '${cam}'?`)) return;
+          if (!confirm(`Are you sure you want to permanently delete zone '${zone}' on camera '${cam}'? This cannot be undone.`)) {
+            return;
+          }
           try {
-            const dr = await fetch(`${getApiBase()}/zones/${encodeURIComponent(cam)}/${encodeURIComponent(zone)}`, {method: 'DELETE'});
+            const dr = await authFetch(`${getApiBase()}/zones/${encodeURIComponent(cam)}/${encodeURIComponent(zone)}`, {method: 'DELETE'});
             if (!dr.ok) throw new Error(`HTTP ${dr.status}`);
             showToast(`Zone '${zone}' deleted`, 'info');
             loadZonesList();
@@ -1141,6 +1294,13 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Delete failed: ${err.message}`, 'error');
           }
         });
+
+        zonesList.appendChild(el);
+      });
+    } catch (e) {
+      zonesList.innerHTML = `<p style="font-size:12px;color:var(--color-false);">${e.message}</p>`;
+    }
+  }
 
         zonesList.appendChild(el);
       });
@@ -1248,7 +1408,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadProcessStatus() {
     try {
-      const res = await fetch(`${getApiBase()}/processes`);
+      const res = await authFetch(`${getApiBase()}/processes`);
       if (!res.ok) return;
       const procs = await res.json();
       procs.forEach(p => {
@@ -1265,7 +1425,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchProcessLogs(name) {
     try {
-      const res = await fetch(`${getApiBase()}/processes/${name}/logs?tail=500`);
+      const res = await authFetch(`${getApiBase()}/processes/${name}/logs?tail=500`);
       if (!res.ok) return;
       const data = await res.json();
       const pre = document.getElementById(`proc-logs-${name}`);
@@ -1318,7 +1478,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       try {
-        const res = await fetch(`${getApiBase()}/processes/${name}/start`, {
+        const res = await authFetch(`${getApiBase()}/processes/${name}/start`, {
           method: 'POST',
           headers: bodyData ? { 'Content-Type': 'application/json' } : {},
           body: bodyData,
@@ -1356,9 +1516,12 @@ document.addEventListener('DOMContentLoaded', () => {
       const name = btn.getAttribute('data-proc');
       if (!name) return;
 
+      const confirmStop = confirm(`Are you sure you want to stop process "${name}"? Any active edge tasks or learning runs will be halted.`);
+      if (!confirmStop) return;
+
       btn.disabled = true;
       try {
-        const res = await fetch(`${getApiBase()}/processes/${name}/stop`, {
+        const res = await authFetch(`${getApiBase()}/processes/${name}/stop`, {
           method: 'POST',
         });
         if (!res.ok) {
@@ -1436,6 +1599,41 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnRefreshProcs = document.getElementById('btn-refresh-procs');
   if (btnRefreshProcs) {
     btnRefreshProcs.addEventListener('click', loadProcessStatus);
+  }
+
+  // Retention Cleanup Button
+  const btnRunRetention = document.getElementById('btn-run-retention-cleanup');
+  if (btnRunRetention) {
+    btnRunRetention.addEventListener('click', async () => {
+      const confirmed = confirm('Run data retention cleanup now? This permanently deletes saved video clips older than 7 days and events older than 30 days.');
+      if (!confirmed) return;
+
+      btnRunRetention.disabled = true;
+      btnRunRetention.textContent = 'Pruning...';
+      try {
+        const res = await authFetch(`${getApiBase()}/retention/cleanup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || res.statusText);
+        }
+        const data = await res.json();
+        showToast(`Retention cleanup completed: ${data.events_pruned} events, ${data.clips_pruned} clips pruned (${data.bytes_reclaimed_mb} MB reclaimed)`, 'success');
+        const statusLabel = document.getElementById('retention-status-label');
+        if (statusLabel) {
+          statusLabel.textContent = `Cleaned at ${new Date().toLocaleTimeString()} (${data.events_pruned} ev, ${data.clips_pruned} clips)`;
+        }
+        fetchAlerts();
+      } catch (e) {
+        showToast(`Retention cleanup failed: ${e.message}`, 'error');
+      } finally {
+        btnRunRetention.disabled = false;
+        btnRunRetention.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Prune Aged Data Now`;
+      }
+    });
   }
 
   // Initial process status check

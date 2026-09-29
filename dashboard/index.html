@@ -35,8 +35,13 @@
         <span class="badge-title">POLICY</span>
         <span id="header-policy-ver" class="badge-val">v1.0.0</span>
       </div>
+      <button id="btn-operator-settings" class="operator-badge" title="Configure Operator ID & API Key" aria-label="Configure Operator Credentials">
+        <span class="op-icon">👤</span>
+        <span id="header-operator-id" class="op-name">op_admin</span>
+        <span class="auth-lock-icon">🔒</span>
+      </button>
       <div class="backend-url-selector">
-        <input type="text" id="api-url-input" placeholder="Backend API URL">
+        <input type="text" id="api-url-input" placeholder="Backend API URL" aria-label="Backend API URL">
       </div>
     </div>
   </header>
@@ -83,6 +88,29 @@
           </div>
         </div>
       </div>
+
+      <!-- Secondary Filter Toolbar (Camera, Time, Keyword) -->
+      <div class="alert-filter-bar">
+        <div class="filter-item">
+          <label for="alert-cam-filter" class="filter-label">Camera:</label>
+          <select id="alert-cam-filter" class="filter-select" aria-label="Filter by camera">
+            <option value="all">All Cameras</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <label for="alert-time-filter" class="filter-label">Time:</label>
+          <select id="alert-time-filter" class="filter-select" aria-label="Filter by time range">
+            <option value="all">All Records</option>
+            <option value="15m">Last 15 min</option>
+            <option value="1h">Last 1 hour</option>
+            <option value="24h">Last 24 hours</option>
+          </select>
+        </div>
+        <div class="filter-item filter-search-wrap">
+          <input type="text" id="alert-search-input" class="filter-search-input" placeholder="Filter alerts..." aria-label="Search alerts">
+        </div>
+      </div>
+
       <div id="alert-feed-container" class="feed-container">
         <div class="feed-empty-state" id="feed-empty">
           <div class="empty-icon">
@@ -569,10 +597,69 @@
           </div>
         </div>
 
+        <!-- Card: Data Retention & Cleanup -->
+        <div class="process-card" id="proc-card-retention">
+          <div class="proc-header">
+            <div class="proc-title-wrap">
+              <span class="proc-dot status-dot-running" id="proc-dot-retention"></span>
+              <div>
+                <h3 class="proc-name">Data Retention &amp; Incident Cleanup</h3>
+                <span class="proc-badge badge-running">ACTIVE POLICY</span>
+              </div>
+            </div>
+            <div class="proc-actions">
+              <button class="btn-secondary" id="btn-run-retention-cleanup" title="Prune events and video clips exceeding retention window">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                Prune Aged Data Now
+              </button>
+            </div>
+          </div>
+          <p class="proc-desc">
+            Enforces GDPR / bounded-storage policies documented in decisions.md. Automatically purges video clips older than 7 days and events older than 30 days to prevent unbounded local disk accumulation.
+          </p>
+          <div class="proc-meta">
+            <div class="proc-meta-item">
+              <span class="meta-label">Clip Retention:</span>
+              <span class="meta-val">7 days</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Event Retention:</span>
+              <span class="meta-val">30 days (max 10,000)</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Last Status:</span>
+              <span class="meta-val" id="retention-status-label">Active (Cleaned on startup)</span>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
-  </main>
+  <!-- Operator Credentials Modal -->
+  <div id="auth-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="auth-modal-title">Operator Security Credentials</h3>
+        <button id="btn-close-auth-modal" class="btn-icon" aria-label="Close credentials modal">✕</button>
+      </div>
+      <p class="modal-desc">Configure your operator call-sign and backend API key. All state-changing actions (feedback, zones, stream start/stop, background jobs) are tied to this authenticated session.</p>
+      <div class="form-group" style="margin-top:14px;">
+        <label class="form-label" for="setting-operator-id">Operator Identifier</label>
+        <input type="text" id="setting-operator-id" class="form-input" placeholder="e.g. op_admin or op_smith" maxlength="64">
+        <p class="form-hint">Recorded with feedback submissions to establish human decision provenance.</p>
+      </div>
+      <div class="form-group" style="margin-top:14px;">
+        <label class="form-label" for="setting-api-key">Backend API Key</label>
+        <input type="password" id="setting-api-key" class="form-input" placeholder="Enter API Key">
+        <p class="form-hint">Matches AEGIS_API_KEY on the backend server (default: aegis-secret-key-2026).</p>
+      </div>
+      <div class="modal-actions" style="margin-top:20px;display:flex;justify-content:flex-end;gap:10px;">
+        <button id="btn-cancel-auth" class="btn-secondary">Cancel</button>
+        <button id="btn-save-auth" class="btn-primary">Save Credentials</button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
