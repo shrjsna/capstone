@@ -335,16 +335,25 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
     logger.info("[stream] Inference loop starting (mode=%s, debounce=%d)",
                 state.mode, debounce_frames)
 
+    webcam_fail_count = 0
     # --- Inference loop ---
     while state.is_running():
         ret, frame = cap.read()
         if not ret:
+            if isinstance(source, int):
+                webcam_fail_count += 1
+                if webcam_fail_count < 15:
+                    time.sleep(0.05)
+                    continue
+                logger.warning("[stream] Webcam disconnected or unavailable — stopping.")
+                break
             # End of file — loop the video (useful for demo with a video file)
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = cap.read()
             if not ret:
                 logger.warning("[stream] Source exhausted and cannot rewind — stopping.")
                 break
+        webcam_fail_count = 0
 
         h, w = frame.shape[:2]
 
@@ -387,13 +396,22 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
 
         elif state.mode == "zone_intrusion" and _ZONE_SUPPORT:
             # --- Zone intrusion mode ---
+            # Dynamically determine person class index from model
+            person_cls_id = None
+            if hasattr(model, "names") and isinstance(model.names, dict):
+                for cid, cname in model.names.items():
+                    if str(cname).lower() == "person":
+                        person_cls_id = cid
+                        break
+            classes_to_track = [person_cls_id] if person_cls_id is not None else [0]
+
             try:
                 results = model.track(
                     source=frame,
                     conf=conf_threshold,
                     tracker="bytetrack.yaml",
                     persist=True,
-                    classes=[0],  # person only
+                    classes=classes_to_track,
                     verbose=False,
                 )
             except Exception as exc:

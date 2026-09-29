@@ -212,6 +212,15 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.classList.add('active');
       document.getElementById(`tab-${tab}`)?.classList.add('active');
       if (tab === 'zones') loadZonesList();
+      if (tab !== 'zones' && isLivePreview) {
+        isLivePreview = false;
+        if (livePreviewTimer) clearInterval(livePreviewTimer);
+        livePreviewTimer = null;
+        if (btnLivePreview) {
+          btnLivePreview.classList.remove('active');
+          btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Live Preview`;
+        }
+      }
       if (tab === 'stream') loadZonesForStream();
       if (tab === 'control') {
         loadProcessStatus();
@@ -1159,10 +1168,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 3. Switch mode to Zone Intrusion
       activeMode = 'zone_intrusion';
-      document.querySelectorAll('.mode-btn').forEach(b => {
-        b.classList.toggle('active', b.getAttribute('data-mode') === 'zone_intrusion');
-      });
-      if (zoneConfigGroup) zoneConfigGroup.style.display = 'flex';
+      if (modeSeg) {
+        modeSeg.querySelectorAll('.seg-btn').forEach(b => {
+          b.classList.toggle('active', b.getAttribute('data-val') === 'zone_intrusion');
+        });
+      }
+      if (zoneConfigGroup) zoneConfigGroup.style.display = '';
 
       // 4. Configure camera source & camera ID
       if (sourceInput) sourceInput.value = captureSource.value.trim() || '0';
@@ -1259,10 +1270,12 @@ document.addEventListener('DOMContentLoaded', () => {
           if (tabStreamEl) tabStreamEl.classList.add('active');
 
           activeMode = 'zone_intrusion';
-          document.querySelectorAll('.mode-btn').forEach(b => {
-            b.classList.toggle('active', b.getAttribute('data-mode') === 'zone_intrusion');
-          });
-          if (zoneConfigGroup) zoneConfigGroup.style.display = 'flex';
+          if (modeSeg) {
+            modeSeg.querySelectorAll('.seg-btn').forEach(b => {
+              b.classList.toggle('active', b.getAttribute('data-val') === 'zone_intrusion');
+            });
+          }
+          if (zoneConfigGroup) zoneConfigGroup.style.display = '';
 
           if (sourceInput) sourceInput.value = captureSource.value.trim() || '0';
           if (cameraIdInput) cameraIdInput.value = cam;
