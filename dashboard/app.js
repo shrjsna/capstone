@@ -73,15 +73,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Zone draw tab
   const captureSource  = document.getElementById('zone-capture-source');
+  const zoneSourcePresets = document.getElementById('zone-source-presets');
   const btnCapture     = document.getElementById('btn-capture-frame');
+  const btnLivePreview = document.getElementById('btn-live-stream-preview');
   const zoneCameraId   = document.getElementById('zone-camera-id');
   const zoneZoneId     = document.getElementById('zone-zone-id');
+  const btnModeBox     = document.getElementById('btn-mode-box');
+  const btnModePoly    = document.getElementById('btn-mode-poly');
+  const btnPresetCenter = document.getElementById('btn-preset-center');
+  const btnPresetFloor = document.getElementById('btn-preset-floor');
   const zoneCanvas     = document.getElementById('zone-canvas');
   const canvasContainer = document.getElementById('canvas-container');
   const canvasPlaceholder = document.getElementById('canvas-placeholder');
+  const canvasHint     = document.getElementById('canvas-hint');
+  const zoneStatusBadge = document.getElementById('zone-status-badge');
   const btnZoneUndo    = document.getElementById('btn-zone-undo');
   const btnZoneClear   = document.getElementById('btn-zone-clear');
   const btnZoneSave    = document.getElementById('btn-zone-save');
+  const btnStartZoneDetect = document.getElementById('btn-start-zone-detect');
   const pointCount     = document.getElementById('zone-point-count');
   const zoneSaveResult = document.getElementById('zone-save-result');
   const zonesList      = document.getElementById('zones-list');
@@ -97,12 +106,21 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeSourceType = 'webcam';
   let activeMode       = 'ppe';
   let isStreaming      = false;
-  let streamCameraId   = 'stream_cam_01';  // tracks the camera_id used for current stream
+  let streamCameraId   = 'stream_cam_01';
 
   // Zone draw state
   let zonePoints       = [];            // [{x,y}] canvas-coordinate polygon points
-  let capturedImageData = null;         // ImageData or img element for background
+  let capturedImageData = null;
   let canvasCtx        = null;
+  let activeZoneType   = 'restricted';  // 'restricted' | 'warning' | 'custom'
+  let activeZoneColor  = '#ef4444';     // Red for danger
+  let drawMode         = 'box';         // 'box' | 'polygon'
+  let isDragging       = false;
+  let dragStart        = {x: 0, y: 0};
+  let dragCurrent      = {x: 0, y: 0};
+  let mouseHoverPoint  = null;
+  let isLivePreview    = false;
+  let livePreviewTimer = null;
 
   // =========================================================================
   // Dynamic API URL
@@ -532,9 +550,123 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   canvasCtx = zoneCanvas.getContext('2d');
 
+  function getCanvasCoords(e) {
+    const rect = zoneCanvas.getBoundingClientRect();
+    const scaleX = zoneCanvas.width / (rect.width || 1);
+    const scaleY = zoneCanvas.height / (rect.height || 1);
+    const rawX = (e.clientX - rect.left) * scaleX;
+    const rawY = (e.clientY - rect.top) * scaleY;
+    return {
+      x: Math.max(0, Math.min(zoneCanvas.width, Math.round(rawX))),
+      y: Math.max(0, Math.min(zoneCanvas.height, Math.round(rawY))),
+    };
+  }
+
+  // Camera source presets sync
+  if (zoneSourcePresets) {
+    zoneSourcePresets.addEventListener('change', () => {
+      if (zoneSourcePresets.value === 'custom') {
+        captureSource.focus();
+      } else {
+        captureSource.value = zoneSourcePresets.value;
+      }
+    });
+  }
+
+  // Zone type options (Red / Yellow / Blue)
+  document.querySelectorAll('.zone-type-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.zone-type-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      activeZoneType = pill.getAttribute('data-type') || 'restricted';
+      activeZoneColor = pill.getAttribute('data-color') || '#ef4444';
+      const presetId = pill.getAttribute('data-zoneid');
+      if (presetId) {
+        zoneZoneId.value = presetId;
+      }
+      redrawCanvas();
+    });
+  });
+
+  // Marking mode (Box vs Polygon)
+  if (btnModeBox) {
+    btnModeBox.addEventListener('click', () => {
+      drawMode = 'box';
+      btnModeBox.classList.add('active');
+      btnModePoly?.classList.remove('active');
+      if (canvasHint) canvasHint.textContent = 'Click & drag on the image to mark a restricted box';
+      mouseHoverPoint = null;
+      redrawCanvas();
+    });
+  }
+
+  if (btnModePoly) {
+    btnModePoly.addEventListener('click', () => {
+      drawMode = 'polygon';
+      btnModePoly.classList.add('active');
+      btnModeBox?.classList.remove('active');
+      if (canvasHint) canvasHint.textContent = 'Click on the image to add polygon boundary points';
+      redrawCanvas();
+    });
+  }
+
+  // Presets: Center Box & Floor Hazard
+  if (btnPresetCenter) {
+    btnPresetCenter.addEventListener('click', () => {
+      const w = zoneCanvas.width || 640;
+      const h = zoneCanvas.height || 480;
+      zonePoints = [
+        {x: Math.round(w * 0.25), y: Math.round(h * 0.25)},
+        {x: Math.round(w * 0.75), y: Math.round(h * 0.25)},
+        {x: Math.round(w * 0.75), y: Math.round(h * 0.75)},
+        {x: Math.round(w * 0.25), y: Math.round(h * 0.75)},
+      ];
+      updatePointCountUI();
+      redrawCanvas();
+      showToast('Center box marked! Click "Detect Anyone Who Enters" to start monitoring.', 'info');
+    });
+  }
+
+  if (btnPresetFloor) {
+    btnPresetFloor.addEventListener('click', () => {
+      const w = zoneCanvas.width || 640;
+      const h = zoneCanvas.height || 480;
+      zonePoints = [
+        {x: Math.round(w * 0.05), y: Math.round(h * 0.55)},
+        {x: Math.round(w * 0.95), y: Math.round(h * 0.55)},
+        {x: Math.round(w * 0.95), y: Math.round(h * 0.95)},
+        {x: Math.round(w * 0.05), y: Math.round(h * 0.95)},
+      ];
+      updatePointCountUI();
+      redrawCanvas();
+      showToast('Floor hazard area marked! Click "Detect Anyone Who Enters".', 'info');
+    });
+  }
+
+  function setupCanvasWithImage(img) {
+    const containerW = canvasContainer.clientWidth - 2;
+    const containerH = canvasContainer.clientHeight - 2;
+    const scale = Math.min(containerW / (img.width || 640), containerH / (img.height || 480), 1);
+    zoneCanvas.width  = Math.round((img.width || 640)  * scale);
+    zoneCanvas.height = Math.round((img.height || 480) * scale);
+    zoneCanvas._imgElement = img;
+    zoneCanvas._scale = scale;
+    zoneCanvas._naturalW = img.width || 640;
+    zoneCanvas._naturalH = img.height || 480;
+
+    canvasPlaceholder.style.display = 'none';
+    zoneCanvas.style.display = 'block';
+    if (zoneStatusBadge) {
+      zoneStatusBadge.className = 'proc-badge badge-running';
+      zoneStatusBadge.textContent = 'IMAGE READY';
+    }
+    redrawCanvas();
+  }
+
+  // Still Frame Capture
   btnCapture.addEventListener('click', async () => {
     const src = captureSource.value.trim();
-    if (!src) { showToast('Enter a source.', 'error'); return; }
+    if (!src) { showToast('Enter a camera source.', 'error'); return; }
 
     btnCapture.disabled = true;
     btnCapture.textContent = 'Capturing…';
@@ -546,34 +678,16 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(err.detail || `HTTP ${r.status}`);
       }
 
-      const frameWidth  = r.headers.get('X-Frame-Width');
-      const frameHeight = r.headers.get('X-Frame-Height');
-
       const blob = await r.blob();
       const imgUrl = URL.createObjectURL(blob);
       const img = new Image();
       img.onload = () => {
-        // Fit canvas inside the container, preserving aspect ratio
-        const containerW = canvasContainer.clientWidth - 2;
-        const containerH = canvasContainer.clientHeight - 2;
-        const scale = Math.min(containerW / img.width, containerH / img.height, 1);
-        zoneCanvas.width  = Math.round(img.width  * scale);
-        zoneCanvas.height = Math.round(img.height * scale);
-        zoneCanvas._imgElement = img;
-        zoneCanvas._scale = scale;
-        zoneCanvas._naturalW = img.width;
-        zoneCanvas._naturalH = img.height;
-
-        canvasPlaceholder.style.display = 'none';
-        zoneCanvas.style.display = 'block';
-
-        // Clear polygon when a new frame is captured
+        setupCanvasWithImage(img);
         zonePoints = [];
         updatePointCountUI();
-        redrawCanvas();
-        showToast('Frame captured — click to add polygon points', 'info');
+        showToast('Frame captured — drag a box or click points to mark zone', 'info');
       };
-      img.onerror = () => { throw new Error('Could not decode captured image.'); };
+      img.onerror = () => { throw new Error('Could not decode captured frame.'); };
       img.src = imgUrl;
     } catch (e) {
       showToast(`Capture failed: ${e.message}`, 'error');
@@ -583,12 +697,116 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Live Stream Preview
+  if (btnLivePreview) {
+    btnLivePreview.addEventListener('click', () => {
+      const src = captureSource.value.trim() || '0';
+      if (isLivePreview) {
+        // Stop preview
+        isLivePreview = false;
+        if (livePreviewTimer) clearInterval(livePreviewTimer);
+        livePreviewTimer = null;
+        btnLivePreview.classList.remove('active');
+        btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Live Preview`;
+        if (zoneStatusBadge) {
+          zoneStatusBadge.className = 'proc-badge badge-stopped';
+          zoneStatusBadge.textContent = 'READY';
+        }
+        showToast('Live preview paused — frame ready for marking', 'info');
+      } else {
+        // Start preview
+        isLivePreview = true;
+        btnLivePreview.classList.add('active');
+        btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>Pause Frame`;
+        if (zoneStatusBadge) {
+          zoneStatusBadge.className = 'proc-badge badge-running';
+          zoneStatusBadge.textContent = 'LIVE PREVIEW';
+        }
+
+        const grab = async () => {
+          if (!isLivePreview) return;
+          try {
+            const r = await fetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
+            if (!r.ok) return;
+            const blob = await r.blob();
+            const imgUrl = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = () => {
+              setupCanvasWithImage(img);
+            };
+            img.src = imgUrl;
+          } catch (_) {}
+        };
+        grab();
+        livePreviewTimer = setInterval(grab, 600);
+        showToast('Live camera preview active — click Pause to freeze', 'info');
+      }
+    });
+  }
+
+  // Canvas Mouse Interactions (Drag Box + Click Points)
+  zoneCanvas.addEventListener('mousedown', e => {
+    if (!zoneCanvas._imgElement) {
+      showToast('Capture a frame or start Live Preview first.', 'info');
+      return;
+    }
+    if (drawMode === 'box') {
+      isDragging = true;
+      dragStart = getCanvasCoords(e);
+      dragCurrent = dragStart;
+    }
+  });
+
+  zoneCanvas.addEventListener('mousemove', e => {
+    const pt = getCanvasCoords(e);
+    if (isDragging && drawMode === 'box') {
+      dragCurrent = pt;
+      redrawCanvas();
+    } else if (drawMode === 'polygon' && zonePoints.length > 0) {
+      mouseHoverPoint = pt;
+      redrawCanvas();
+    }
+  });
+
+  window.addEventListener('mouseup', e => {
+    if (isDragging && drawMode === 'box') {
+      isDragging = false;
+      const pt = getCanvasCoords(e);
+      const x1 = Math.min(dragStart.x, pt.x);
+      const x2 = Math.max(dragStart.x, pt.x);
+      const y1 = Math.min(dragStart.y, pt.y);
+      const y2 = Math.max(dragStart.y, pt.y);
+      if ((x2 - x1) >= 15 && (y2 - y1) >= 15) {
+        zonePoints = [
+          {x: x1, y: y1},
+          {x: x2, y: y1},
+          {x: x2, y: y2},
+          {x: x1, y: y2},
+        ];
+        updatePointCountUI();
+        redrawCanvas();
+        showToast(`Marked ${zoneZoneId.value} restricted zone! Click "Detect Anyone Who Enters".`, 'info');
+      }
+    }
+  });
+
   zoneCanvas.addEventListener('click', e => {
-    if (!zoneCanvas._imgElement) return;
-    const rect = zoneCanvas.getBoundingClientRect();
-    const x = Math.round(e.clientX - rect.left);
-    const y = Math.round(e.clientY - rect.top);
-    zonePoints.push({x, y});
+    if (drawMode !== 'polygon') return;
+    if (!zoneCanvas._imgElement) {
+      showToast('Capture a frame or start Live Preview first.', 'info');
+      return;
+    }
+    const pt = getCanvasCoords(e);
+    if (zonePoints.length >= 3) {
+      const d0 = Math.hypot(pt.x - zonePoints[0].x, pt.y - zonePoints[0].y);
+      if (d0 < 22) {
+        showToast('Polygon boundary closed!', 'info');
+        mouseHoverPoint = null;
+        redrawCanvas();
+        return;
+      }
+    }
+    zonePoints.push(pt);
     updatePointCountUI();
     redrawCanvas();
   });
@@ -598,56 +816,110 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctx = canvasCtx;
     ctx.clearRect(0, 0, zoneCanvas.width, zoneCanvas.height);
 
-    // Draw background image
+    // Draw background video frame
     ctx.drawImage(zoneCanvas._imgElement, 0, 0, zoneCanvas.width, zoneCanvas.height);
+
+    const mainColor = activeZoneColor || '#ef4444';
+
+    // 1. Draw Dragging Box Preview
+    if (isDragging && drawMode === 'box') {
+      const x1 = Math.min(dragStart.x, dragCurrent.x);
+      const y1 = Math.min(dragStart.y, dragCurrent.y);
+      const w = Math.abs(dragCurrent.x - dragStart.x);
+      const h = Math.abs(dragCurrent.y - dragStart.y);
+
+      ctx.fillStyle = activeZoneType === 'restricted' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(251, 191, 36, 0.25)';
+      ctx.fillRect(x1, y1, w, h);
+
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x1, y1, w, h);
+      ctx.setLineDash([]);
+
+      // Label with dimensions
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillText(`${w}x${h}px`, x1 + 6, y1 + 16);
+      return;
+    }
 
     if (zonePoints.length === 0) return;
 
-    // Fill semi-transparent polygon
+    // 2. Fill Semi-transparent Zone
     if (zonePoints.length >= 3) {
       ctx.beginPath();
       ctx.moveTo(zonePoints[0].x, zonePoints[0].y);
       zonePoints.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
       ctx.closePath();
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+      ctx.fillStyle = activeZoneType === 'restricted' ? 'rgba(239, 68, 68, 0.22)' : 'rgba(251, 191, 36, 0.22)';
       ctx.fill();
     }
 
-    // Draw edges
+    // 3. Draw Polygon Edges
     ctx.beginPath();
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = mainColor;
+    ctx.lineWidth = 2.5;
     ctx.setLineDash([]);
     ctx.moveTo(zonePoints[0].x, zonePoints[0].y);
     zonePoints.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+
     if (zonePoints.length >= 3) {
       ctx.setLineDash([5, 4]);
-      ctx.lineTo(zonePoints[0].x, zonePoints[0].y);  // closing edge preview dashed
+      ctx.lineTo(zonePoints[0].x, zonePoints[0].y);
       ctx.setLineDash([]);
     }
     ctx.stroke();
 
-    // Draw vertices
+    // 4. Polygon Guide line to mouse
+    if (drawMode === 'polygon' && mouseHoverPoint && zonePoints.length > 0) {
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.lineWidth = 1.5;
+      const last = zonePoints[zonePoints.length - 1];
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(mouseHoverPoint.x, mouseHoverPoint.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 5. Draw Vertices
     zonePoints.forEach((p, i) => {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = i === 0 ? '#10b981' : '#38bdf8';
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? '#10b981' : mainColor;
       ctx.fill();
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2;
       ctx.stroke();
-      // Index label
+
+      // Vertex Index label
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 11px Inter, sans-serif';
-      ctx.fillText(i + 1, p.x + 7, p.y - 5);
+      ctx.fillText(i + 1, p.x + 8, p.y - 6);
     });
+
+    // 6. Zone Name Label
+    if (zonePoints.length >= 1) {
+      const p0 = zonePoints[0];
+      const zName = zoneZoneId.value.trim() || 'RESTRICTED ZONE';
+      ctx.fillStyle = mainColor;
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(p0.x, Math.max(10, p0.y - 28), ctx.measureText(zName).width + 16, 20, 4) : ctx.rect(p0.x, Math.max(10, p0.y - 28), ctx.measureText(zName).width + 16, 20);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillText(zName, p0.x + 8, Math.max(24, p0.y - 14));
+    }
   }
 
   function updatePointCountUI() {
-    pointCount.textContent = zonePoints.length;
-    btnZoneUndo.disabled = zonePoints.length === 0;
-    btnZoneClear.disabled = zonePoints.length === 0;
-    btnZoneSave.disabled = zonePoints.length < 3;
+    if (pointCount) pointCount.textContent = zonePoints.length;
+    if (btnZoneUndo) btnZoneUndo.disabled = zonePoints.length === 0;
+    if (btnZoneClear) btnZoneClear.disabled = zonePoints.length === 0;
+    if (btnZoneSave) btnZoneSave.disabled = zonePoints.length < 3;
+    if (btnStartZoneDetect) btnStartZoneDetect.disabled = zonePoints.length < 3;
   }
 
   btnZoneUndo.addEventListener('click', () => {
@@ -662,13 +934,13 @@ document.addEventListener('DOMContentLoaded', () => {
     redrawCanvas();
   });
 
-  btnZoneSave.addEventListener('click', async () => {
-    if (zonePoints.length < 3) return;
+  // Save Zone Helper Function
+  async function saveCurrentZone() {
+    if (zonePoints.length < 3) return null;
     const camId  = zoneCameraId.value.trim() || 'cam_01';
-    const zoneId = zoneZoneId.value.trim()   || 'zone_1';
+    const zoneId = zoneZoneId.value.trim()   || 'zone_red_1';
     const scale  = zoneCanvas._scale || 1;
 
-    // Convert canvas coordinates back to native pixel coordinates
     const nativePolygon = zonePoints.map(p => [
       Math.round(p.x / scale),
       Math.round(p.y / scale),
@@ -696,16 +968,76 @@ document.addEventListener('DOMContentLoaded', () => {
       zoneSaveResult.innerHTML = `<strong>Zone saved:</strong> ${saved.filename}<br><span style="font-size:11px;color:var(--text-dim);">${saved.point_count} points · ${camId} / ${zoneId}</span>`;
       showToast(`Zone '${zoneId}' saved`, 'info');
       loadZonesList();
+      return saved;
     } catch (e) {
       zoneSaveResult.style.display = 'block';
       zoneSaveResult.className = 'zone-save-result error';
       zoneSaveResult.textContent = `Save failed: ${e.message}`;
+      return null;
     }
+  }
+
+  btnZoneSave.addEventListener('click', async () => {
+    await saveCurrentZone();
   });
 
-  // =========================================================================
-  // Zone list
-  // =========================================================================
+  // "Detect Anyone Who Enters" - Complete Workflow
+  if (btnStartZoneDetect) {
+    btnStartZoneDetect.addEventListener('click', async () => {
+      if (zonePoints.length < 3) {
+        showToast('Please mark at least 3 points or drag a box first.', 'error');
+        return;
+      }
+
+      btnStartZoneDetect.disabled = true;
+      btnStartZoneDetect.textContent = 'Configuring Intrusion Detection…';
+
+      // 1. Save zone
+      const saved = await saveCurrentZone();
+      if (!saved) {
+        btnStartZoneDetect.disabled = false;
+        btnStartZoneDetect.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>Detect Anyone Who Enters`;
+        return;
+      }
+
+      showToast(`Zone saved! Launching intrusion detection on ${saved.zone_id}...`, 'info');
+
+      // 2. Switch to Live Stream tab
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      const streamTabBtn = document.querySelector('.tab-btn[data-tab="stream"]');
+      if (streamTabBtn) streamTabBtn.classList.add('active');
+      const tabStreamEl = document.getElementById('tab-stream');
+      if (tabStreamEl) tabStreamEl.classList.add('active');
+
+      // 3. Switch mode to Zone Intrusion
+      activeMode = 'zone_intrusion';
+      document.querySelectorAll('.mode-btn').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-mode') === 'zone_intrusion');
+      });
+      if (zoneConfigGroup) zoneConfigGroup.style.display = 'flex';
+
+      // 4. Configure camera source & camera ID
+      if (sourceInput) sourceInput.value = captureSource.value.trim() || '0';
+      if (cameraIdInput) cameraIdInput.value = zoneCameraId.value.trim() || 'cam_01';
+      if (zoneIdInput) zoneIdInput.value = zoneZoneId.value.trim() || 'zone_red_1';
+
+      // 5. Refresh zones dropdown and select newly saved zone
+      await loadZonesForStream();
+      if (streamZoneSelect && saved.file_path) {
+        streamZoneSelect.value = saved.file_path;
+      }
+
+      // 6. Launch Live Stream
+      setTimeout(() => {
+        btnStreamStart.click();
+        btnStartZoneDetect.disabled = false;
+        btnStartZoneDetect.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>Detect Anyone Who Enters`;
+      }, 350);
+    });
+  }
+
+  // Saved zones list loader
   async function loadZonesList() {
     try {
       const r = await fetch(`${getApiBase()}/zones`);
@@ -713,7 +1045,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const zones = await r.json();
       zonesList.innerHTML = '';
       if (zones.length === 0) {
-        zonesList.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">No saved zones yet. Draw one above.</p>';
+        zonesList.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">No saved zones yet. Mark one above.</p>';
         return;
       }
       zones.forEach(z => {
@@ -725,11 +1057,77 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="zone-list-meta">${z.camera_id} · ${z.point_count} pts</span>
             <span class="zone-list-file">${z.filename}</span>
           </div>
-          <button class="btn-icon zone-delete-btn" title="Delete zone" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-            </svg>
-          </button>`;
+          <div class="zone-list-actions">
+            <button class="btn-zone-action-load" title="Load and view on canvas" data-poly='${JSON.stringify(z.polygon || [])}' data-cam="${z.camera_id}" data-zone="${z.zone_id}">
+              Load
+            </button>
+            <button class="btn-zone-action-detect" title="Run live intrusion detection" data-file="${z.file_path}" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
+              ▶ Detect
+            </button>
+            <button class="btn-icon zone-delete-btn" title="Delete zone" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+              </svg>
+            </button>
+          </div>`;
+
+        // Load onto canvas
+        el.querySelector('.btn-zone-action-load').addEventListener('click', e => {
+          const polyStr = e.currentTarget.getAttribute('data-poly');
+          const cam = e.currentTarget.getAttribute('data-cam');
+          const zone = e.currentTarget.getAttribute('data-zone');
+          try {
+            const poly = JSON.parse(polyStr);
+            const scale = zoneCanvas._scale || 1;
+            zonePoints = poly.map(pt => ({
+              x: Math.round(pt[0] * scale),
+              y: Math.round(pt[1] * scale),
+            }));
+            zoneCameraId.value = cam;
+            zoneZoneId.value = zone;
+            updatePointCountUI();
+            redrawCanvas();
+            showToast(`Loaded zone '${zone}' onto canvas`, 'info');
+          } catch (err) {
+            showToast('Could not load polygon coordinates', 'error');
+          }
+        });
+
+        // Run detection directly
+        el.querySelector('.btn-zone-action-detect').addEventListener('click', async e => {
+          const file = e.currentTarget.getAttribute('data-file');
+          const cam = e.currentTarget.getAttribute('data-cam');
+          const zone = e.currentTarget.getAttribute('data-zone');
+
+          // Switch to Live Stream
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+          const streamTabBtn = document.querySelector('.tab-btn[data-tab="stream"]');
+          if (streamTabBtn) streamTabBtn.classList.add('active');
+          const tabStreamEl = document.getElementById('tab-stream');
+          if (tabStreamEl) tabStreamEl.classList.add('active');
+
+          activeMode = 'zone_intrusion';
+          document.querySelectorAll('.mode-btn').forEach(b => {
+            b.classList.toggle('active', b.getAttribute('data-mode') === 'zone_intrusion');
+          });
+          if (zoneConfigGroup) zoneConfigGroup.style.display = 'flex';
+
+          if (sourceInput) sourceInput.value = captureSource.value.trim() || '0';
+          if (cameraIdInput) cameraIdInput.value = cam;
+          if (zoneIdInput) zoneIdInput.value = zone;
+
+          await loadZonesForStream();
+          if (streamZoneSelect && file) {
+            streamZoneSelect.value = file;
+          }
+
+          setTimeout(() => {
+            btnStreamStart.click();
+          }, 300);
+        });
+
+        // Delete zone
         el.querySelector('.zone-delete-btn').addEventListener('click', async e => {
           const cam  = e.currentTarget.getAttribute('data-cam');
           const zone = e.currentTarget.getAttribute('data-zone');
@@ -743,6 +1141,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Delete failed: ${err.message}`, 'error');
           }
         });
+
         zonesList.appendChild(el);
       });
     } catch (e) {

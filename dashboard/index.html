@@ -265,21 +265,52 @@
     <!-- Left: controls -->
     <aside class="panel zone-controls-panel">
       <div class="panel-header compact">
-        <h3>Draw Restricted Zone</h3>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="info-tag" style="background:var(--accent-cyan-glow);color:var(--accent-cyan);font-weight:700;">STEP 1</span>
+          <h3>Mark Restricted Zone</h3>
+        </div>
       </div>
-      <p class="panel-desc">Capture a still frame from your camera, then click on it to define a restricted-zone polygon. Saved zones are used by both the live stream and the standalone pipeline script.</p>
+      <p class="panel-desc">Mark restricted danger areas on your video stream or still frame. Then click <strong>"Detect Anyone Who Enters"</strong> to launch real-time intrusion monitoring.</p>
 
       <!-- Source for capture -->
       <div class="form-group">
-        <label class="form-label">Camera Source (for frame capture)</label>
-        <input type="text" id="zone-capture-source" class="form-input" value="0" placeholder="0 | rtsp://... | path/to/video.mp4">
-        <p class="form-hint">Same format as Live Stream. Use 0 for webcam.</p>
+        <label class="form-label">Camera Source</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="zone-capture-source" class="form-input" style="flex:1;" value="0" placeholder="0 | demo/videos/...">
+          <select id="zone-source-presets" class="form-input" style="width:115px;padding:6px 6px;font-size:12px;">
+            <option value="0">Webcam (0)</option>
+            <option value="demo/videos/zone_intrusion_demo.mp4">Demo Video</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
       </div>
 
-      <button id="btn-capture-frame" class="btn-secondary" style="width:100%;margin-bottom:12px;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-        Capture Frame
-      </button>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button id="btn-capture-frame" class="btn-secondary" style="flex:1;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          Capture Frame
+        </button>
+        <button id="btn-live-stream-preview" class="btn-secondary" style="flex:1;" title="Toggle live camera preview to mark zone">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Live Preview
+        </button>
+      </div>
+
+      <!-- Zone Presets & Options -->
+      <div class="form-group">
+        <label class="form-label">Zone Options &amp; Danger Level</label>
+        <div class="zone-type-picker">
+          <button type="button" class="zone-type-pill active" data-type="restricted" data-color="#ef4444" data-zoneid="zone_red_1">
+            <span class="dot-color dot-red"></span> Red Zone (Danger / Restricted)
+          </button>
+          <button type="button" class="zone-type-pill" data-type="warning" data-color="#fbbf24" data-zoneid="zone_caution_1">
+            <span class="dot-color dot-yellow"></span> Yellow Zone (Warning / Caution)
+          </button>
+          <button type="button" class="zone-type-pill" data-type="custom" data-color="#38bdf8" data-zoneid="zone_custom_1">
+            <span class="dot-color dot-blue"></span> Custom Zone (Cyan)
+          </button>
+        </div>
+      </div>
 
       <!-- Zone metadata -->
       <div class="form-row">
@@ -293,14 +324,35 @@
         </div>
       </div>
 
-      <!-- Drawing controls -->
+      <!-- Drawing Mode: Box vs Polygon -->
+      <div class="form-group">
+        <label class="form-label">Marking Method</label>
+        <div class="zone-mode-selector">
+          <button type="button" class="zone-draw-mode-btn active" data-mode="box" id="btn-mode-box">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+            Drag Box (Fast)
+          </button>
+          <button type="button" class="zone-draw-mode-btn" data-mode="polygon" id="btn-mode-poly">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+            Click Points (Custom)
+          </button>
+        </div>
+      </div>
+
+      <!-- Drawing controls & shape presets -->
       <div class="zone-draw-controls">
         <div class="zone-point-count">
           <span class="form-label">Points:</span>
           <span id="zone-point-count" class="badge-val">0</span>
           <span style="font-size:11px;color:var(--text-dim);">(min 3)</span>
         </div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:4px;">
+          <button type="button" id="btn-preset-center" class="btn-icon" title="Apply Center Box Preset" style="font-size:11px;width:auto;padding:0 6px;">
+            Center
+          </button>
+          <button type="button" id="btn-preset-floor" class="btn-icon" title="Apply Floor Hazard Preset" style="font-size:11px;width:auto;padding:0 6px;">
+            Floor
+          </button>
           <button id="btn-zone-undo" class="btn-icon" title="Undo last point" disabled>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
           </button>
@@ -310,10 +362,18 @@
         </div>
       </div>
 
-      <button id="btn-zone-save" class="btn-primary" style="width:100%;margin-top:4px;" disabled>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-        Save Zone
-      </button>
+      <!-- Save & Detection Action Buttons -->
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+        <button id="btn-zone-save" class="btn-secondary" style="width:100%;" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Zone Config
+        </button>
+
+        <button id="btn-start-zone-detect" class="btn-primary btn-detect-zone-action" style="width:100%;" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Detect Anyone Who Enters
+        </button>
+      </div>
 
       <div id="zone-save-result" class="zone-save-result" style="display:none;"></div>
 
@@ -333,15 +393,21 @@
 
     <!-- Right: canvas drawing area -->
     <section class="panel zone-canvas-panel">
-      <div class="panel-header compact">
-        <h3>Zone Polygon Editor</h3>
-        <span style="font-size:11px;color:var(--text-dim);">Click on the image to add polygon points</span>
+      <div class="panel-header compact" style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h3>Zone Marking Canvas</h3>
+          <span id="zone-status-badge" class="proc-badge badge-stopped" style="font-size:10px;">READY</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span id="canvas-hint" style="font-size:12px;color:var(--accent-cyan);">Click &amp; drag on the image to mark a restricted box</span>
+        </div>
       </div>
 
       <div class="canvas-container" id="canvas-container">
         <div class="canvas-placeholder" id="canvas-placeholder">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-          <p>Capture a frame to begin drawing</p>
+          <p style="font-weight:500;">Capture a frame or start Live Preview to begin marking</p>
+          <p style="font-size:12px;color:var(--text-dim);max-width:320px;">Use your camera or demo video to draw restricted zones where people should not enter.</p>
         </div>
         <canvas id="zone-canvas" style="display:none;cursor:crosshair;"></canvas>
       </div>
