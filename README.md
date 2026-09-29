@@ -77,3 +77,53 @@ This will:
 > python -m http.server 8080 --directory dashboard
 > ```
 
+---
+
+## Deploying for Real Use
+
+While AEGIS was initially prototyped for single-machine demonstration, this production-readiness pass hardens the server for unattended, 24/7 network operation on an industrial LAN.
+
+### 1. Configuration & Security Credentials
+Configuration is loaded from environment variables or a local `.env` file (copied from `.env.example`):
+
+```bash
+cp .env.example .env
+```
+
+Key environment variables:
+| Variable | Default | Purpose |
+|---|---|---|
+| `AEGIS_HOST` | `0.0.0.0` | Bind address (`127.0.0.1` for local-only, `0.0.0.0` for LAN access) |
+| `AEGIS_PORT` | `8000` | Port for unified backend API and dashboard |
+| `AEGIS_API_KEY` | `aegis-secret-key-2026` | **Mandatory shared secret** required on all state-mutating endpoints |
+| `AEGIS_AUTH_REQUIRED` | `true` | When `true`, enforces API key checks on mutating routes |
+| `AEGIS_CORS_ORIGINS` | `http://localhost:8000,...` | Comma-delimited list of permitted CORS origins (no wildcards by default) |
+| `AEGIS_RETENTION_DAYS` | `7` | Maximum age (days) for local `.mp4`/`.avi` incident clips before auto-pruning |
+| `AEGIS_RETENTION_MAX_EVENTS` | `5000` | SQLite event limit before FIFO truncation |
+| `AEGIS_MAX_MJPEG_CLIENTS` | `10` | Concurrency ceiling for simultaneous live stream viewers |
+
+### 2. Authentication & Provenance Model
+- **Protected Endpoints:** All state-changing routes (`POST /events`, `POST /feedback`, `POST /zones`, `DELETE /zones/{cam}/{zone}`, `POST /stream/start`, `POST /stream/stop`, `POST /processes/{name}/start`, `POST /processes/{name}/stop`, `POST /retention/cleanup`) require the API key.
+- **Header Delivery:** Send `X-API-Key: <your-key>` (or `Authorization: Bearer <your-key>`).
+- **Dashboard Integration:** Click the operator badge (`👤 op_admin 🔒`) in the top-right header to configure your operator call-sign and API key. Stored locally in browser `localStorage`.
+- **Operator Provenance:** Human feedback (`POST /feedback`) records both the verified session key and the operator identifier (`X-Operator-ID` or payload `operator_id`) to maintain an accountable audit trail.
+
+### 3. Data Retention & Incident Cleanup
+- **Automated Startup Pruning:** The backend executes retention enforcement on server lifespan startup.
+- **Manual Trigger:** Operators can trigger pruning on-demand from the **Control Panel** tab or via `POST /retention/cleanup`.
+- **Privacy & Storage Bounds:** Incident video clips older than `AEGIS_RETENTION_DAYS` and database records exceeding retention windows are pruned, adhering to the best-effort storage commitments in `docs/decisions.md`.
+
+### 4. Network Exposure & Hardening Recommendation
+By default, `run.py` binds to `0.0.0.0:8000` to allow operators on factory-floor tablets or phones to view streams and acknowledge alerts. For deployment outside an air-gapped or trusted VLAN:
+1. **Reverse Proxy (Nginx / Caddy):** Terminate TLS (HTTPS/WSS) in front of AEGIS.
+2. **Firewall Rules:** Restrict port 8000 access to designated camera IP ranges and operator subnets.
+3. **Bind to Localhost:** If using a reverse proxy on the same host, set `AEGIS_HOST=127.0.0.1`.
+
+### 5. Honest Statement of Residual Security Gaps
+To prevent false assumptions regarding production security, note the following architectural boundaries:
+- **No TLS / HTTPS Out of the Box:** AEGIS runs plain HTTP. Any traffic over untrusted networks can be intercepted unless fronted by a TLS reverse proxy.
+- **Shared Secret vs. Individual Accounts:** Authentication uses a single shared secret key (`AEGIS_API_KEY`) and self-asserted operator call-signs, not individual user accounts, OAuth2/OIDC, or salted per-user password hashes.
+- **No Role-Based Access Control (RBAC):** Any holder of the valid API key has full permissions (can acknowledge alerts, start/stop processes, delete zones, and trigger retention cleanups).
+- **Local File Storage:** SQLite databases and video clips are stored with standard filesystem permissions without at-rest encryption. Ensure proper OS-level filesystem ACLs on the host machine.
+
+
