@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let feedbackMap       = new Map();
   let isConnected       = true;
   let activeSourceType  = 'webcam';
-  let activeMode        = 'ppe';
+  let activeMode        = 'all';
   let isStreaming       = false;
   let streamCameraId    = 'stream_cam_01';
 
@@ -543,7 +543,7 @@ document.addEventListener('DOMContentLoaded', () => {
       modeSeg.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       activeMode = btn.getAttribute('data-val');
-      zoneConfigGroup.style.display = activeMode === 'zone_intrusion' ? '' : 'none';
+      zoneConfigGroup.style.display = (activeMode === 'zone_intrusion' || activeMode === 'all') ? '' : 'none';
     });
   });
 
@@ -592,7 +592,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const source = sourceInput.value.trim();
     if (!source) { showToast('Enter a source first.', 'error'); return; }
 
-    const zoneConfigPath = activeMode === 'zone_intrusion' ? (streamZoneSelect.value || null) : null;
+    const zoneConfigPath = (activeMode === 'zone_intrusion' || activeMode === 'all') ? (streamZoneSelect.value || null) : null;
 
     streamCameraId = cameraIdInput.value.trim() || 'stream_cam_01';
 
@@ -629,7 +629,7 @@ document.addEventListener('DOMContentLoaded', () => {
       streamErrorBox.style.display = 'none';
       streamInfo.style.display = 'block';
       infoSource.textContent = source;
-      infoMode.textContent = activeMode === 'ppe' ? 'PPE Detection' : 'Zone Intrusion';
+      infoMode.textContent = activeMode === 'all' ? 'All-in-One (PPE + Zone)' : activeMode === 'ppe' ? 'PPE Detection' : 'Zone Intrusion';
       setStreamBadge('live');
       btnStreamStop.disabled = false;
       btnStreamStart.textContent = 'Restart Stream';

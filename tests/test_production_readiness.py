@@ -402,3 +402,25 @@ class TestZonePolygonPersistence:
 
         # Clean up
         client.delete("/zones/cam_catalog_test/zone_box_1", headers=headers)
+
+
+# ===========================================================================
+# 7. Continuous All-in-One Stream Tests (PPE + Zone Combined)
+# ===========================================================================
+
+class TestContinuousAllInOneStream:
+    """Validate start_stream supports simultaneous 'all' and 'combined' modes."""
+
+    def test_start_stream_supports_all_mode(self):
+        client = TestClient(app)
+        headers = {"X-API-Key": "test-secret-key-123"}
+        res = client.post(
+            "/stream/start",
+            json={"source": "demo/videos/zone_intrusion_demo.mp4", "mode": "all"},
+            headers=headers,
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["started"] is True
+        assert data["mode"] == "all"
+        client.post("/stream/stop", headers=headers)

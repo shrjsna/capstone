@@ -74,7 +74,7 @@ class PolicyUpdateRecord(BaseModel):
 
 class StreamStartRequest(BaseModel):
     source: str = Field(..., min_length=1, max_length=256)
-    mode: str = Field("ppe", pattern=r"^(ppe|zone_intrusion)$")
+    mode: str = Field("all", pattern=r"^(all|combined|ppe|zone_intrusion)$")
     model_path: Optional[str] = Field(None, max_length=256)
     zone_config_path: Optional[str] = Field(None, max_length=256)
     camera_id: str = Field("stream_cam", min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-\.]+$")

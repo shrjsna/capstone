@@ -206,12 +206,13 @@ def _draw_ppe_annotations(frame, boxes, model_names: Dict[int, str]) -> List[Dic
 
 
 def _draw_zone_annotations(frame, zone_config: Dict, boxes,
-                            frame_counts: Dict) -> List[Dict]:
+                            frame_counts: Dict,
+                            person_cls_id: Optional[int] = None) -> List[Dict]:
     """Draw zone polygon + tracked persons, return in-zone detection dicts."""
     cv2 = _get_cv2()
     detections = []
 
-    # Draw zone polygon (cyan: BGR 251,191,36 → actually use cyan 255,230,0)
+    # Draw zone polygon (cyan: BGR 0,230,255)
     polygon = zone_config.get("polygon", [])
     if polygon:
         pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
@@ -230,11 +231,16 @@ def _draw_zone_annotations(frame, zone_config: Dict, boxes,
     if boxes is None or boxes.id is None:
         return detections
 
-    track_ids = boxes.id.int().tolist()
-    confidences = boxes.conf.tolist()
-    xyxy_list = boxes.xyxy.tolist()
+    for box in boxes:
+        if box.id is None:
+            continue
+        cls_id = int(box.cls[0].item())
+        if person_cls_id is not None and cls_id != person_cls_id:
+            continue
 
-    for tid, conf, xyxy in zip(track_ids, confidences, xyxy_list):
+        tid = int(box.id[0].item())
+        conf = float(box.conf[0].item())
+        xyxy = box.xyxy[0].tolist()
         x1, y1, x2, y2 = [int(v) for v in xyxy]
         in_zone = check_box_in_zone(xyxy, zone_config) if _ZONE_SUPPORT else False
 
@@ -298,35 +304,29 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
         cap.release()
         return
 
-    # --- Zone config (if zone_intrusion mode) ---
+    # --- Zone config (if zone_intrusion or combined mode) ---
     zone_config: Optional[Dict] = None
     zone_debouncer = None
-    if state.mode == "zone_intrusion":
-        if not _ZONE_SUPPORT:
-            state.set_error("Zone intrusion modules not available on this installation.")
-            state.set_running(False)
-            cap.release()
-            return
-        if state.zone_config_path:
-            try:
-                zone_config = load_zone_config(state.zone_config_path)
-                logger.info("[stream] Zone config loaded: %s", state.zone_config_path)
-            except Exception as exc:
-                msg = f"Failed to load zone config {state.zone_config_path!r}: {exc}"
-                logger.error("[stream] %s", msg)
-                state.set_error(msg)
-                state.set_running(False)
-                cap.release()
-                return
-        else:
-            # Default zone config path
-            default_zone = str(_REPO_ROOT / "edge" / "zone_intrusion" / "zones" / "camera_01_zones.json")
-            try:
-                zone_config = load_zone_config(default_zone)
-            except Exception:
-                zone_config = None
+    if state.mode in ("zone_intrusion", "all", "combined"):
+        if _ZONE_SUPPORT:
+            if state.zone_config_path:
+                try:
+                    zone_config = load_zone_config(state.zone_config_path)
+                    logger.info("[stream] Zone config loaded: %s", state.zone_config_path)
+                except Exception as exc:
+                    logger.warning("[stream] Failed to load zone config %s: %s", state.zone_config_path, exc)
+            if zone_config is None:
+                # Auto-detect existing zone config in edge/zone_intrusion/zones
+                zones_dir = _REPO_ROOT / "edge" / "zone_intrusion" / "zones"
+                found_zones = sorted(list(zones_dir.glob("*.json"))) if zones_dir.is_dir() else []
+                if found_zones:
+                    try:
+                        zone_config = load_zone_config(str(found_zones[0]))
+                        logger.info("[stream] Auto-loaded existing zone config: %s", found_zones[0].name)
+                    except Exception:
+                        zone_config = None
 
-        zone_debouncer = ZoneDebounceTracker(required_frames=debounce_frames)
+            zone_debouncer = ZoneDebounceTracker(required_frames=debounce_frames)
 
     # --- PPE debouncer ---
     ppe_debouncer = DebounceTracker(debounce_threshold=debounce_frames)
@@ -338,7 +338,13 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
     webcam_fail_count = 0
     # --- Inference loop ---
     while state.is_running():
-        ret, frame = cap.read()
+        try:
+            read_result = cap.read()
+            if not isinstance(read_result, (tuple, list)) or len(read_result) < 2:
+                break
+            ret, frame = read_result[0], read_result[1]
+        except Exception:
+            break
         if not ret:
             if isinstance(source, int):
                 webcam_fail_count += 1
@@ -357,20 +363,33 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
 
         h, w = frame.shape[:2]
 
-        if state.mode == "ppe":
-            # --- PPE detection mode ---
-            try:
-                results = model.track(
-                    source=frame,
-                    conf=conf_threshold,
-                    tracker="bytetrack.yaml",
-                    persist=True,
-                    verbose=False,
-                )
-            except Exception as exc:
-                logger.warning("[stream] Model track failed: %s", exc)
-                results = []
+        # Determine person class ID
+        person_cls_id = None
+        if hasattr(model, "names") and isinstance(model.names, dict):
+            for cid, cname in model.names.items():
+                if str(cname).lower() == "person":
+                    person_cls_id = cid
+                    break
+        if person_cls_id is None:
+            person_cls_id = 12 if (hasattr(model, "names") and 12 in model.names) else 0
 
+        classes_arg = [person_cls_id] if state.mode == "zone_intrusion" else None
+
+        try:
+            results = model.track(
+                source=frame,
+                conf=conf_threshold,
+                tracker="bytetrack.yaml",
+                persist=True,
+                classes=classes_arg,
+                verbose=False,
+            )
+        except Exception as exc:
+            logger.warning("[stream] Model track failed: %s", exc)
+            results = []
+
+        # 1. PPE processing (in 'ppe' mode or 'all'/'combined' mode)
+        if state.mode in ("ppe", "all", "combined"):
             frame_detections = []
             for r in results:
                 raw = _draw_ppe_annotations(frame, r.boxes, model.names)
@@ -394,38 +413,12 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
                 if events_api_url:
                     post_event(event, events_api_url)
 
-        elif state.mode == "zone_intrusion" and _ZONE_SUPPORT:
-            # --- Zone intrusion mode ---
-            # Dynamically determine person class index from model
-            person_cls_id = None
-            if hasattr(model, "names") and isinstance(model.names, dict):
-                for cid, cname in model.names.items():
-                    if str(cname).lower() == "person":
-                        person_cls_id = cid
-                        break
-            classes_to_track = [person_cls_id] if person_cls_id is not None else [0]
-
-            try:
-                results = model.track(
-                    source=frame,
-                    conf=conf_threshold,
-                    tracker="bytetrack.yaml",
-                    persist=True,
-                    classes=classes_to_track,
-                    verbose=False,
-                )
-            except Exception as exc:
-                logger.warning("[stream] Model track failed: %s", exc)
-                results = []
-
+        # 2. Zone intrusion processing (in 'zone_intrusion' mode or 'all'/'combined' mode)
+        if state.mode in ("zone_intrusion", "all", "combined") and _ZONE_SUPPORT and zone_config:
             for r in results:
-                if zone_config:
-                    zone_dets = _draw_zone_annotations(
-                        frame, zone_config, r.boxes, frame_counts
-                    )
-                else:
-                    zone_dets = []
-
+                zone_dets = _draw_zone_annotations(
+                    frame, zone_config, r.boxes, frame_counts, person_cls_id=person_cls_id
+                )
                 for det in zone_dets:
                     tid = det["track_id"]
                     conf = det["confidence"]
@@ -455,16 +448,27 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
                 # Reset zone debouncer for persons NOT in zone this frame
                 if r.boxes is not None and r.boxes.id is not None and zone_debouncer:
                     in_zone_ids = {det["track_id"] for det in zone_dets}
-                    for tid_all in r.boxes.id.int().tolist():
-                        if tid_all not in in_zone_ids:
-                            zone_debouncer.update(
-                                track_id=tid_all, cls="person", is_in_zone=False
-                            )
+                    for box in r.boxes:
+                        if box.id is not None:
+                            b_cls = int(box.cls[0].item())
+                            if person_cls_id is not None and b_cls != person_cls_id:
+                                continue
+                            tid_all = int(box.id[0].item())
+                            if tid_all not in in_zone_ids:
+                                zone_debouncer.update(
+                                    track_id=tid_all, cls="person", is_in_zone=False
+                                )
 
         # --- Add stream overlay (mode label + source) ---
-        mode_label = "PPE DETECTION" if state.mode == "ppe" else "ZONE INTRUSION"
+        if state.mode in ("all", "combined"):
+            mode_label = "ALL-IN-ONE (PPE + ZONE)"
+        elif state.mode == "ppe":
+            mode_label = "PPE DETECTION"
+        else:
+            mode_label = "ZONE INTRUSION"
+
         cv2.putText(frame, f"AEGIS LIVE — {mode_label}", (8, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (56, 189, 248), 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, (56, 189, 248), 1, cv2.LINE_AA)
         cv2.putText(frame, f"src: {str(source_raw)[:40]}", (8, h - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (100, 100, 100), 1, cv2.LINE_AA)
 
@@ -515,10 +519,10 @@ def start_stream(
             if state._thread and state._thread.is_alive():
                 state._thread.join(timeout=2.0)
 
-        if mode not in ("ppe", "zone_intrusion"):
+        if mode not in ("ppe", "zone_intrusion", "all", "combined"):
             return {
                 "started": False,
-                "error": f"Unknown mode '{mode}'. Use 'ppe' or 'zone_intrusion'.",
+                "error": f"Unknown mode '{mode}'. Use 'all', 'ppe', or 'zone_intrusion'.",
                 "source": source,
             }
 

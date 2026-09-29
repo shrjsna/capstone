@@ -188,13 +188,14 @@
       <div class="form-group">
         <label class="form-label">Detection Mode</label>
         <div class="seg-control" id="mode-seg">
-          <button class="seg-btn active" data-val="ppe">PPE Detection</button>
-          <button class="seg-btn" data-val="zone_intrusion">Zone Intrusion</button>
+          <button class="seg-btn active" data-val="all">All (PPE + Zone)</button>
+          <button class="seg-btn" data-val="ppe">PPE Only</button>
+          <button class="seg-btn" data-val="zone_intrusion">Zone Only</button>
         </div>
       </div>
 
-      <!-- Zone config (only shown in zone_intrusion mode) -->
-      <div class="form-group" id="zone-config-group" style="display:none;">
+      <!-- Zone config (shown in all and zone_intrusion mode) -->
+      <div class="form-group" id="zone-config-group">
         <label class="form-label">Zone Config</label>
         <select id="stream-zone-select" class="form-input">
           <option value="">Loading zones...</option>
