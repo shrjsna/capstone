@@ -66,11 +66,14 @@ def log_event(event, log_path):
         f.write(json.dumps(event) + "\n")
 
 
-def post_event(event, api_url):
-    """POST a detection event to the backend API. Non-blocking best-effort."""
+def post_event(event, api_url, api_key=None):
+    """POST a detection event to the backend API with API key authentication."""
     try:
+        import os
         import requests
-        resp = requests.post(api_url, json=event, timeout=5)
+        key = api_key or os.getenv("AEGIS_API_KEY", "aegis-secret-key-2026")
+        headers = {"X-API-Key": key} if key else {}
+        resp = requests.post(api_url, json=event, headers=headers, timeout=5)
         resp.raise_for_status()
         return True
     except Exception as exc:

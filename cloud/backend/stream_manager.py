@@ -461,9 +461,17 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
     logger.info("[stream] Worker thread exited cleanly.")
 
 
-# ---------------------------------------------------------------------------
-# Public API — called by FastAPI endpoints in main.py
-# ---------------------------------------------------------------------------
+# Concurrency & Client Management Locks
+_stream_control_lock = threading.Lock()
+_client_count_lock = threading.Lock()
+_active_mjpeg_clients = 0
+MAX_MJPEG_CLIENTS = 10
+_capture_lock = threading.Lock()
+
+
+def get_capture_lock() -> threading.Lock:
+    return _capture_lock
+
 
 def start_stream(
     source: str,
@@ -477,49 +485,53 @@ def start_stream(
     conf_threshold: float = 0.25,
 ) -> Dict[str, Any]:
     """
-    Start a background inference stream.
-
-    Returns a dict with keys: started (bool), error (str|None), source (str).
-    If a stream is already running it is stopped first.
+    Start a background inference stream safely with re-entrancy protection.
+    If a stream is already running, it is cleanly stopped and joined first.
     """
-    state = _stream_state
+    with _stream_control_lock:
+        state = _stream_state
 
-    # Stop any running stream
-    if state.is_running():
-        stop_stream()
-        time.sleep(0.3)  # give thread a moment to exit
+        # Stop and join any running worker thread
+        if state.is_running():
+            stop_stream()
+            if state._thread and state._thread.is_alive():
+                state._thread.join(timeout=2.0)
 
-    if mode not in ("ppe", "zone_intrusion"):
-        return {"started": False, "error": f"Unknown mode '{mode}'. Use 'ppe' or 'zone_intrusion'.", "source": source}
+        if mode not in ("ppe", "zone_intrusion"):
+            return {
+                "started": False,
+                "error": f"Unknown mode '{mode}'. Use 'ppe' or 'zone_intrusion'.",
+                "source": source,
+            }
 
-    # Default model path
-    if model_path is None:
-        model_path = str(_REPO_ROOT / "edge" / "ppe_detection" / "models" / "ppe_final_v4.pt")
+        # Default model path
+        if model_path is None:
+            model_path = str(_REPO_ROOT / "edge" / "ppe_detection" / "models" / "ppe_final_v4.pt")
 
-    state.clear()
-    state.source = source
-    state.mode = mode
-    state.zone_config_path = zone_config_path
-    state.camera_id = camera_id
-    state.zone_id = zone_id
-    state.api_url = events_api_url
-    state.set_running(True)
+        state.clear()
+        state.source = source
+        state.mode = mode
+        state.zone_config_path = zone_config_path
+        state.camera_id = camera_id
+        state.zone_id = zone_id
+        state.api_url = events_api_url
+        state.set_running(True)
 
-    thread = threading.Thread(
-        target=_stream_worker,
-        args=(state, model_path, events_api_url, debounce_frames, conf_threshold),
-        daemon=True,
-        name="aegis-stream-worker",
-    )
-    thread.start()
-    state._thread = thread
+        thread = threading.Thread(
+            target=_stream_worker,
+            args=(state, model_path, events_api_url, debounce_frames, conf_threshold),
+            daemon=True,
+            name="aegis-stream-worker",
+        )
+        thread.start()
+        state._thread = thread
 
-    logger.info("[stream] Started: source=%s mode=%s", source, mode)
-    return {"started": True, "error": None, "source": source, "mode": mode}
+        logger.info("[stream] Started: source=%s mode=%s", source, mode)
+        return {"started": True, "error": None, "source": source, "mode": mode}
 
 
 def stop_stream() -> Dict[str, Any]:
-    """Signal the background stream worker to stop. Returns immediately."""
+    """Signal the background stream worker to stop and wait briefly for release."""
     state = _stream_state
     if not state.is_running():
         return {"stopped": True, "was_running": False}
@@ -531,6 +543,8 @@ def stop_stream() -> Dict[str, Any]:
 def stream_status() -> Dict[str, Any]:
     """Return current stream state for the /stream/status endpoint."""
     state = _stream_state
+    with _client_count_lock:
+        client_count = _active_mjpeg_clients
     return {
         "running": state.is_running(),
         "source": state.source,
@@ -539,37 +553,46 @@ def stream_status() -> Dict[str, Any]:
         "zone_id": state.zone_id,
         "error": state.get_error(),
         "has_frame": state.get_latest_frame() is not None,
+        "active_viewers": client_count,
     }
 
 
 def generate_mjpeg_frames() -> Generator[bytes, None, None]:
     """
-    Yield MJPEG boundary-encoded frame chunks for a multipart/x-mixed-replace
-    streaming response.
-
-    Usage in FastAPI:
-        return StreamingResponse(generate_mjpeg_frames(),
-                                 media_type="multipart/x-mixed-replace; boundary=aegisframe")
+    Yield MJPEG boundary-encoded frame chunks for multipart/x-mixed-replace.
+    Protects server against client explosion by enforcing a MAX_MJPEG_CLIENTS limit.
     """
+    global _active_mjpeg_clients
+    with _client_count_lock:
+        if _active_mjpeg_clients >= MAX_MJPEG_CLIENTS:
+            err_frame = _make_placeholder_frame(f"Max viewers ({MAX_MJPEG_CLIENTS}) reached")
+            yield b"--aegisframe\r\nContent-Type: image/jpeg\r\n\r\n" + err_frame + b"\r\n"
+            return
+        _active_mjpeg_clients += 1
+
     state = _stream_state
     boundary = b"--aegisframe\r\n"
     content_type = b"Content-Type: image/jpeg\r\n\r\n"
     tail = b"\r\n"
 
-    # Serve a placeholder grey frame if no stream is running yet
     placeholder = _make_placeholder_frame("No active stream")
 
-    while True:
-        if state.is_running():
-            frame_bytes = state.wait_for_frame(timeout=2.0)
-        else:
-            frame_bytes = None
-            time.sleep(0.05)
+    try:
+        while True:
+            if state.is_running():
+                frame_bytes = state.wait_for_frame(timeout=2.0)
+            else:
+                frame_bytes = None
+                time.sleep(0.4)  # Conservative polling when inactive
 
-        if frame_bytes is None:
-            frame_bytes = placeholder
+            if frame_bytes is None:
+                frame_bytes = placeholder
 
-        yield boundary + content_type + frame_bytes + tail
+            yield boundary + content_type + frame_bytes + tail
+    finally:
+        with _client_count_lock:
+            _active_mjpeg_clients = max(0, _active_mjpeg_clients - 1)
+
 
 
 def get_latest_frame_jpeg() -> Optional[bytes]:

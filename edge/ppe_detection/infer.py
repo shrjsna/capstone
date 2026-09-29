@@ -198,11 +198,13 @@ def log_event(event: Dict[str, Any], output_path: Path) -> None:
         f.write(json.dumps(event) + "\n")
 
 
-def post_event(event: Dict[str, Any], api_url: str) -> bool:
-    """Send event JSON payload to backend endpoint via HTTP POST."""
+def post_event(event: Dict[str, Any], api_url: str, api_key: Optional[str] = None) -> bool:
+    """Send event JSON payload to backend endpoint via HTTP POST with API key authentication."""
     try:
         import requests
-        resp = requests.post(api_url, json=event, timeout=5)
+        key = api_key or os.getenv("AEGIS_API_KEY", "aegis-secret-key-2026")
+        headers = {"X-API-Key": key} if key else {}
+        resp = requests.post(api_url, json=event, headers=headers, timeout=5)
         resp.raise_for_status()
         return True
     except Exception as exc:
