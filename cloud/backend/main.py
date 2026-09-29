@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,10 @@ from cloud.backend.stream_manager import (
     stream_status,
     generate_mjpeg_frames,
     get_latest_frame_jpeg,
+)
+from cloud.backend.process_manager import (
+    get_process_manager,
+    ProcessStartRequest,
 )
 
 # Zone storage directory — persists zone configs as JSON files
@@ -57,6 +62,16 @@ async def lifespan(app: FastAPI):
         db.commit()
     db.close()
     yield
+    # Shutdown cleanup
+    try:
+        stop_stream()
+    except Exception:
+        pass
+    try:
+        get_process_manager().stop_all()
+    except Exception:
+        pass
+
 
 
 app = FastAPI(
@@ -498,4 +513,54 @@ def delete_zone(camera_id: str, zone_id: str):
 
     filepath.unlink()
     return {"deleted": True, "filename": filename}
+
+
+# =========================================================================
+# Subprocess Management Endpoints (Control Panel)
+# =========================================================================
+
+@app.get("/processes", status_code=status.HTTP_200_OK)
+def list_managed_processes():
+    """List all managed background subprocesses and their status."""
+    return get_process_manager().list_processes()
+
+
+@app.post("/processes/{name}/start", status_code=status.HTTP_200_OK)
+def start_managed_process(name: str, req: Optional[ProcessStartRequest] = None):
+    """Start a named managed process (federated_demo or zone_pipeline)."""
+    try:
+        source = req.source if req else None
+        return get_process_manager().start_process(name, source=source)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/processes/{name}/stop", status_code=status.HTTP_200_OK)
+def stop_managed_process(name: str):
+    """Stop a named managed process and confirm all its child processes have terminated."""
+    try:
+        return get_process_manager().stop_process(name)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/processes/{name}/logs", status_code=status.HTTP_200_OK)
+def get_managed_process_logs(name: str, tail: int = Query(default=500, ge=1, le=1000)):
+    """Fetch bounded recent logs for a managed process."""
+    try:
+        return get_process_manager().get_logs(name, tail=tail)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# =========================================================================
+# Static Files — Single-Process Dashboard Serving
+# Mounted AFTER all API routes so it does not shadow API endpoints.
+# =========================================================================
+_DASHBOARD_DIR = _REPO_ROOT / "dashboard"
+if _DASHBOARD_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(_DASHBOARD_DIR), html=True), name="dashboard")
+
 
