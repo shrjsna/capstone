@@ -1302,13 +1302,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-        zonesList.appendChild(el);
-      });
-    } catch (e) {
-      zonesList.innerHTML = `<p style="font-size:12px;color:var(--color-false);">${e.message}</p>`;
-    }
-  }
-
   btnRefreshZones.addEventListener('click', loadZonesList);
 
   // =========================================================================
