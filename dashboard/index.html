@@ -55,6 +55,10 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
       Draw Zone
     </button>
+    <button class="tab-btn" data-tab="control">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Control Panel
+    </button>
   </nav>
 
   <!-- ===== TAB: ALERT FEED ===== -->
@@ -340,6 +344,165 @@
           <p>Capture a frame to begin drawing</p>
         </div>
         <canvas id="zone-canvas" style="display:none;cursor:crosshair;"></canvas>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== TAB: CONTROL PANEL ===== -->
+  <main class="control-layout tab-content" id="tab-control">
+
+    <section class="panel control-main-panel">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <h2>Process &amp; Orchestration Control Panel</h2>
+          <span class="info-tag">Subprocess Manager</span>
+        </div>
+        <div class="feed-controls">
+          <button id="btn-refresh-procs" class="btn-icon" title="Refresh Process Status">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p class="panel-desc" style="margin-bottom: 20px;">
+        Launch and supervise background processes directly from the browser. Eliminates manual terminal windows while keeping all actions within a strict server-side whitelist.
+      </p>
+
+      <div class="process-cards-grid">
+
+        <!-- Card: Federated Learning Demo -->
+        <div class="process-card" id="proc-card-federated_demo">
+          <div class="proc-header">
+            <div class="proc-title-wrap">
+              <span class="proc-dot status-dot-stopped" id="proc-dot-federated_demo"></span>
+              <div>
+                <h3 class="proc-name">Federated Learning Demo</h3>
+                <span class="proc-badge badge-stopped" id="proc-badge-federated_demo">STOPPED</span>
+              </div>
+            </div>
+            <div class="proc-actions">
+              <button class="btn-primary btn-proc-start" data-proc="federated_demo" id="btn-start-federated_demo">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Start FedAvg
+              </button>
+              <button class="btn-secondary btn-proc-stop" data-proc="federated_demo" id="btn-stop-federated_demo" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                Stop
+              </button>
+            </div>
+          </div>
+
+          <p class="proc-desc">
+            Orchestrates a Flower FedAvg aggregation server on <code class="inline-code">127.0.0.1:8089</code> and launches 2 edge clients (<code class="inline-code">site_1</code> and <code class="inline-code">site_2</code>) to retrain policy weights collaboratively.
+          </p>
+
+          <div class="proc-meta">
+            <div class="proc-meta-item">
+              <span class="meta-label">Active PIDs:</span>
+              <span class="meta-val" id="proc-pids-federated_demo">—</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Started:</span>
+              <span class="meta-val" id="proc-time-federated_demo">—</span>
+            </div>
+          </div>
+
+          <!-- Log toggle & section -->
+          <div class="proc-logs-section">
+            <div class="proc-logs-header">
+              <button class="btn-toggle-logs" data-proc="federated_demo" id="btn-toggle-federated_demo">
+                <svg class="chevron-icon" id="chevron-federated_demo" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <span class="logs-header-text">Process Logs (<span id="proc-logcount-federated_demo">0</span> lines)</span>
+              </button>
+              <div class="logs-actions">
+                <span class="log-poll-indicator" id="proc-poll-federated_demo" style="display:none;">
+                  <span class="dot-small pulse"></span> LIVE STREAMING
+                </span>
+                <button class="btn-icon btn-copy-logs" data-proc="federated_demo" title="Copy logs to clipboard">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="proc-logs-body" id="proc-logs-body-federated_demo">
+              <pre class="proc-log-view" id="proc-logs-federated_demo">Ready. Press "Start FedAvg" to launch.</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Zone Intrusion Pipeline -->
+        <div class="process-card" id="proc-card-zone_pipeline">
+          <div class="proc-header">
+            <div class="proc-title-wrap">
+              <span class="proc-dot status-dot-stopped" id="proc-dot-zone_pipeline"></span>
+              <div>
+                <h3 class="proc-name">Zone Intrusion Pipeline</h3>
+                <span class="proc-badge badge-stopped" id="proc-badge-zone_pipeline">STOPPED</span>
+              </div>
+            </div>
+            <div class="proc-actions">
+              <button class="btn-primary btn-proc-start" data-proc="zone_pipeline" id="btn-start-zone_pipeline">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Start Pipeline
+              </button>
+              <button class="btn-secondary btn-proc-stop" data-proc="zone_pipeline" id="btn-stop-zone_pipeline" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                Stop
+              </button>
+            </div>
+          </div>
+
+          <p class="proc-desc">
+            Executes standalone edge tracking with multi-point polygon containment, face-blurred MP4 incident clip recording, and JSONL logging.
+          </p>
+
+          <div class="proc-config-row">
+            <label for="zone-proc-source" class="form-label" style="font-size:12px;margin-bottom:0;min-width:85px;">Video Source:</label>
+            <div style="display:flex;gap:8px;flex:1;flex-wrap:wrap;">
+              <input type="text" id="zone-proc-source" class="form-input" style="flex:1;min-width:200px;padding:6px 10px;font-size:12px;" value="demo/videos/zone_intrusion_demo.mp4" placeholder="demo/videos/... or 0 or rtsp://...">
+              <select id="zone-proc-source-select" class="form-input" style="width:160px;padding:6px 8px;font-size:12px;">
+                <option value="demo/videos/zone_intrusion_demo.mp4">Demo Video (mp4)</option>
+                <option value="0">Local Webcam (0)</option>
+                <option value="1">External Webcam (1)</option>
+                <option value="custom">Custom Path/URL</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="proc-meta">
+            <div class="proc-meta-item">
+              <span class="meta-label">Active PIDs:</span>
+              <span class="meta-val" id="proc-pids-zone_pipeline">—</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Started:</span>
+              <span class="meta-val" id="proc-time-zone_pipeline">—</span>
+            </div>
+          </div>
+
+          <!-- Log toggle & section -->
+          <div class="proc-logs-section">
+            <div class="proc-logs-header">
+              <button class="btn-toggle-logs" data-proc="zone_pipeline" id="btn-toggle-zone_pipeline">
+                <svg class="chevron-icon" id="chevron-zone_pipeline" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <span class="logs-header-text">Process Logs (<span id="proc-logcount-zone_pipeline">0</span> lines)</span>
+              </button>
+              <div class="logs-actions">
+                <span class="log-poll-indicator" id="proc-poll-zone_pipeline" style="display:none;">
+                  <span class="dot-small pulse"></span> LIVE STREAMING
+                </span>
+                <button class="btn-icon btn-copy-logs" data-proc="zone_pipeline" title="Copy logs to clipboard">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="proc-logs-body" id="proc-logs-body-zone_pipeline">
+              <pre class="proc-log-view" id="proc-logs-zone_pipeline">Ready. Press "Start Pipeline" to launch.</pre>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 

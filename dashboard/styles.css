@@ -1171,10 +1171,299 @@ body {
   .console-grid {
     grid-template-columns: 1fr;
   }
-  .stream-layout, .zone-layout {
+  .stream-layout, .zone-layout, .control-layout {
     flex-direction: column;
   }
   .stream-controls-panel, .zone-controls-panel {
     width: 100%;
   }
 }
+
+/* =========================================================================
+   Control Panel Tab Layout & Process Cards
+   ========================================================================= */
+
+.control-layout {
+  padding: 24px;
+  flex: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.control-main-panel {
+  width: 100%;
+}
+
+.process-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.process-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.process-card:hover {
+  border-color: var(--border-highlight);
+}
+
+.process-card.is-running {
+  border-color: rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.06);
+}
+
+.process-card.is-crashed {
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.08);
+}
+
+.proc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.proc-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.proc-name {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.proc-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.badge-stopped {
+  background: rgba(100, 116, 139, 0.15);
+  color: var(--text-dim);
+  border: 1px solid rgba(100, 116, 139, 0.3);
+}
+
+.badge-running {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  animation: pulse-border 2s infinite;
+}
+
+.badge-crashed {
+  background: var(--color-false-bg);
+  color: var(--color-false);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.badge-completed {
+  background: var(--color-confirm-bg);
+  color: var(--color-confirm);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.proc-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot-stopped {
+  background: var(--text-dim);
+}
+
+.status-dot-running {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan);
+  animation: pulse-dot 1.8s infinite;
+}
+
+.status-dot-crashed {
+  background: var(--color-false);
+  box-shadow: 0 0 10px var(--color-false);
+}
+
+.status-dot-completed {
+  background: var(--color-confirm);
+  box-shadow: 0 0 10px var(--color-confirm);
+}
+
+.proc-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-proc-start, .btn-proc-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.proc-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.inline-code {
+  font-family: monospace;
+  background: var(--bg-surface);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--accent-cyan);
+  font-size: 12px;
+}
+
+.proc-config-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-surface);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.proc-meta {
+  display: flex;
+  gap: 24px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+
+.proc-meta-item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.meta-label {
+  color: var(--text-dim);
+}
+
+.meta-val {
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+/* Collapsible Logs Section */
+.proc-logs-section {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.proc-logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.btn-toggle-logs {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-toggle-logs:hover {
+  color: var(--accent-cyan);
+}
+
+.chevron-icon {
+  transition: transform 0.2s ease;
+}
+
+.chevron-icon.rotated {
+  transform: rotate(180deg);
+}
+
+.logs-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.log-poll-indicator {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.5px;
+}
+
+.dot-small {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+}
+
+.proc-logs-body {
+  display: none;
+  max-height: 320px;
+  overflow-y: auto;
+  background: #06090e;
+}
+
+.proc-logs-body.open {
+  display: block;
+}
+
+.proc-log-view {
+  margin: 0;
+  padding: 12px 16px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #c9d1d9;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+

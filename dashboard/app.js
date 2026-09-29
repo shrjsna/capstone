@@ -14,7 +14,15 @@
 // Dynamic API base URL — works from localhost AND from LAN IP on a phone
 // ---------------------------------------------------------------------------
 function buildDefaultApiUrl() {
-  const host = window.location.hostname; // e.g. "127.0.0.1" or "192.168.1.42"
+  if (window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file:')) {
+    // If running on port 8080 (legacy manual static server), point to :8000
+    if (window.location.port === '8080') {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    // Single-origin serving: dashboard and backend run on same origin (port 8000)
+    return window.location.origin;
+  }
+  const host = window.location.hostname || '127.0.0.1';
   return `http://${host}:8000`;
 }
 
@@ -118,6 +126,12 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById(`tab-${tab}`)?.classList.add('active');
       if (tab === 'zones') loadZonesList();
       if (tab === 'stream') loadZonesForStream();
+      if (tab === 'control') {
+        loadProcessStatus();
+        startProcessPolling();
+      } else {
+        stopProcessPolling();
+      }
     });
   });
 
@@ -755,6 +769,280 @@ document.addEventListener('DOMContentLoaded', () => {
   btnSimZone.addEventListener('click', () => simulateEvent('zone_intrusion'));
 
   // =========================================================================
+  // Control Panel (Subprocess Orchestration) Logic
+  // =========================================================================
+  let procPollTimer = null;
+  const openLogsMap = new Set(); // tracks process names with expanded log viewers
+  const lastKnownStatus = new Map();
+
+  function formatTime(isoStr) {
+    if (!isoStr) return '—';
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return isoStr;
+    }
+  }
+
+  function updateProcessCardUI(proc) {
+    const name = proc.name;
+    const card = document.getElementById(`proc-card-${name}`);
+    const dot = document.getElementById(`proc-dot-${name}`);
+    const badge = document.getElementById(`proc-badge-${name}`);
+    const btnStart = document.getElementById(`btn-start-${name}`);
+    const btnStop = document.getElementById(`btn-stop-${name}`);
+    const pidsEl = document.getElementById(`proc-pids-${name}`);
+    const timeEl = document.getElementById(`proc-time-${name}`);
+    const logCountEl = document.getElementById(`proc-logcount-${name}`);
+    const pollInd = document.getElementById(`proc-poll-${name}`);
+    const logBody = document.getElementById(`proc-logs-body-${name}`);
+    const chevron = document.getElementById(`chevron-${name}`);
+
+    if (!card) return;
+
+    const prevStatus = lastKnownStatus.get(name);
+    lastKnownStatus.set(name, proc.status);
+
+    // If newly crashed, auto-open log viewer so the user sees error output immediately
+    if (proc.status === 'crashed' && prevStatus !== 'crashed') {
+      openLogsMap.add(name);
+      if (logBody) logBody.classList.add('open');
+      if (chevron) chevron.classList.add('rotated');
+      fetchProcessLogs(name);
+    }
+
+    // Status classes
+    card.classList.remove('is-running', 'is-crashed');
+    if (proc.status === 'running') card.classList.add('is-running');
+    if (proc.status === 'crashed') card.classList.add('is-crashed');
+
+    // Dot & Badge styling
+    if (dot) {
+      dot.className = `proc-dot status-dot-${proc.status}`;
+    }
+    if (badge) {
+      badge.className = `proc-badge badge-${proc.status}`;
+      badge.textContent = proc.status.toUpperCase();
+    }
+
+    // Buttons
+    if (btnStart) btnStart.disabled = (proc.status === 'running');
+    if (btnStop) btnStop.disabled = (proc.status !== 'running');
+
+    // Meta
+    if (pidsEl) {
+      pidsEl.textContent = (proc.pids && proc.pids.length > 0) ? proc.pids.join(', ') : '—';
+    }
+    if (timeEl) {
+      timeEl.textContent = formatTime(proc.started_at);
+    }
+    if (logCountEl && typeof proc.logs_count === 'number') {
+      logCountEl.textContent = proc.logs_count;
+    }
+
+    // Polling indicator
+    if (pollInd) {
+      pollInd.style.display = (proc.status === 'running' && openLogsMap.has(name)) ? 'flex' : 'none';
+    }
+  }
+
+  async function loadProcessStatus() {
+    try {
+      const res = await fetch(`${getApiBase()}/processes`);
+      if (!res.ok) return;
+      const procs = await res.json();
+      procs.forEach(p => {
+        updateProcessCardUI(p);
+        // If logs section is open or process is running, fetch latest logs
+        if (openLogsMap.has(p.name) || p.status === 'running') {
+          fetchProcessLogs(p.name);
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to load process status:', e);
+    }
+  }
+
+  async function fetchProcessLogs(name) {
+    try {
+      const res = await fetch(`${getApiBase()}/processes/${name}/logs?tail=500`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const pre = document.getElementById(`proc-logs-${name}`);
+      const logBody = document.getElementById(`proc-logs-body-${name}`);
+      const logCountEl = document.getElementById(`proc-logcount-${name}`);
+
+      if (logCountEl && Array.isArray(data.logs)) {
+        logCountEl.textContent = data.logs.length;
+      }
+
+      if (pre && Array.isArray(data.logs)) {
+        const text = data.logs.length > 0 ? data.logs.join('\n') : '(No logs recorded)';
+        // Check if user was already at bottom before appending to keep auto-scrolling
+        const isNearBottom = logBody ? (logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight < 60) : false;
+        pre.textContent = text;
+        if (isNearBottom && logBody) {
+          logBody.scrollTop = logBody.scrollHeight;
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed to fetch logs for ${name}:`, e);
+    }
+  }
+
+  function startProcessPolling() {
+    if (procPollTimer) clearInterval(procPollTimer);
+    procPollTimer = setInterval(loadProcessStatus, 1500);
+  }
+
+  function stopProcessPolling() {
+    if (procPollTimer) {
+      clearInterval(procPollTimer);
+      procPollTimer = null;
+    }
+  }
+
+  // Bind Start buttons
+  document.querySelectorAll('.btn-proc-start').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+
+      btn.disabled = true;
+      let bodyData = null;
+
+      if (name === 'zone_pipeline') {
+        const srcInput = document.getElementById('zone-proc-source');
+        const sourceVal = srcInput ? srcInput.value.trim() : 'demo/videos/zone_intrusion_demo.mp4';
+        bodyData = JSON.stringify({ source: sourceVal });
+      }
+
+      try {
+        const res = await fetch(`${getApiBase()}/processes/${name}/start`, {
+          method: 'POST',
+          headers: bodyData ? { 'Content-Type': 'application/json' } : {},
+          body: bodyData,
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(`Start failed: ${err.detail || res.statusText}`, 'error');
+          btn.disabled = false;
+          return;
+        }
+
+        const data = await res.json();
+        updateProcessCardUI(data);
+
+        // Auto-open logs panel so operator sees immediate progress
+        openLogsMap.add(name);
+        const logBody = document.getElementById(`proc-logs-body-${name}`);
+        const chevron = document.getElementById(`chevron-${name}`);
+        if (logBody) logBody.classList.add('open');
+        if (chevron) chevron.classList.add('rotated');
+
+        showToast(`Process ${name} launched`, 'info');
+        loadProcessStatus();
+      } catch (e) {
+        showToast(`Error starting process: ${e.message}`, 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // Bind Stop buttons
+  document.querySelectorAll('.btn-proc-stop').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+
+      btn.disabled = true;
+      try {
+        const res = await fetch(`${getApiBase()}/processes/${name}/stop`, {
+          method: 'POST',
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(`Stop failed: ${err.detail || res.statusText}`, 'error');
+          btn.disabled = false;
+          return;
+        }
+        const data = await res.json();
+        updateProcessCardUI(data);
+        showToast(`Process ${name} stopped`, 'info');
+        loadProcessStatus();
+      } catch (e) {
+        showToast(`Error stopping process: ${e.message}`, 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // Bind Log Toggle buttons
+  document.querySelectorAll('.btn-toggle-logs').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+      const logBody = document.getElementById(`proc-logs-body-${name}`);
+      const chevron = document.getElementById(`chevron-${name}`);
+
+      if (!logBody) return;
+      if (logBody.classList.contains('open')) {
+        logBody.classList.remove('open');
+        if (chevron) chevron.classList.remove('rotated');
+        openLogsMap.delete(name);
+      } else {
+        logBody.classList.add('open');
+        if (chevron) chevron.classList.add('rotated');
+        openLogsMap.add(name);
+        fetchProcessLogs(name);
+        // Scroll to bottom on open
+        setTimeout(() => { logBody.scrollTop = logBody.scrollHeight; }, 50);
+      }
+      loadProcessStatus();
+    });
+  });
+
+  // Bind Copy Log buttons
+  document.querySelectorAll('.btn-copy-logs').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+      const pre = document.getElementById(`proc-logs-${name}`);
+      if (pre && pre.textContent) {
+        navigator.clipboard.writeText(pre.textContent).then(() => {
+          showToast(`Copied ${name} logs to clipboard`, 'info');
+        }).catch(() => {
+          showToast('Failed to copy to clipboard', 'error');
+        });
+      }
+    });
+  });
+
+  // Sync Zone Source Dropdown & Input
+  const zoneSourceSelect = document.getElementById('zone-proc-source-select');
+  const zoneSourceInput = document.getElementById('zone-proc-source');
+  if (zoneSourceSelect && zoneSourceInput) {
+    zoneSourceSelect.addEventListener('change', () => {
+      if (zoneSourceSelect.value === 'custom') {
+        zoneSourceInput.focus();
+      } else {
+        zoneSourceInput.value = zoneSourceSelect.value;
+      }
+    });
+  }
+
+  // Refresh process list button
+  const btnRefreshProcs = document.getElementById('btn-refresh-procs');
+  if (btnRefreshProcs) {
+    btnRefreshProcs.addEventListener('click', loadProcessStatus);
+  }
+
+  // Initial process status check
+  loadProcessStatus();
+
+  // =========================================================================
   // Polling loop
   // =========================================================================
   fetchAlerts();
@@ -762,3 +1050,4 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchPolicyHistory();
   setInterval(() => { fetchAlerts(); fetchThresholds(); }, 2000);
 });
+
