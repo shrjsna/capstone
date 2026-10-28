@@ -148,3 +148,24 @@ Why: completes final capstone integration; all 112 tests passing across all 4 mo
 Module B: Zone Intrusion, Module C: Contextual Bandit, Module D: Backend/Dashboard/Federated).
 Ensures zero mock paths in live demo while retaining MockBanditAdapter for isolated unit testing.
 
+## 2026-09-29 — Lightweight API key authentication for mutating endpoints
+Decided: require a shared secret API key (via `X-API-Key`, `Authorization: Bearer`, or query param)
+on all mutating endpoints (`/events`, `/feedback`, `/zones`, `/stream/start`, `/stream/stop`, `/processes/*`,
+`/retention/cleanup`), while keeping read-only endpoints (`/health`, `/thresholds`, `/alerts`, `/zones` GET)
+accessible to monitoring and dashboard consumers.
+Why: protects against unauthorized tampering when exposed on factory LANs without the overhead
+and complexity of a full multi-tenant user authentication and session management database.
+
+## 2026-09-29 — Data retention policy implementation & automated disk cleanup
+Decided: implement automated age-based pruning of SQLite events and edge video clips (`clips/` directory)
+on server lifespan startup and expose an authenticated `POST /retention/cleanup` trigger.
+Why: fulfills the privacy and bounded storage commitment made on 2026-09-05 ("bounded storage,"
+"best-effort automated anonymization"); prevents unattended edge deployments from running out of disk space.
+
+## 2026-09-29 — Comprehensive input sanitization & path containment
+Decided: enforce strict regex validation (`^[a-zA-Z0-9_\-\.]+$`) and `pathlib.Path.is_relative_to`
+containment on all user-supplied identifiers (camera_id, zone_id, model paths, zone configs, process names).
+Why: prevents directory traversal attacks (`../../`) and arbitrary file write/overwrite vulnerabilities
+across zone configuration and process execution subsystems.
+
+

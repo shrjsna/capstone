@@ -14,7 +14,15 @@
 // Dynamic API base URL — works from localhost AND from LAN IP on a phone
 // ---------------------------------------------------------------------------
 function buildDefaultApiUrl() {
-  const host = window.location.hostname; // e.g. "127.0.0.1" or "192.168.1.42"
+  if (window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file:')) {
+    // If running on port 8080 (legacy manual static server), point to :8000
+    if (window.location.port === '8080') {
+      return `${window.location.protocol}//${window.location.hostname}:8000`;
+    }
+    // Single-origin serving: dashboard and backend run on same origin (port 8000)
+    return window.location.origin;
+  }
+  const host = window.location.hostname || '127.0.0.1';
   return `http://${host}:8000`;
 }
 
@@ -36,6 +44,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusIndicator = document.querySelector('.status-indicator');
   const statusDot      = statusIndicator?.querySelector('.dot');
   const statusLabel    = statusIndicator?.querySelector('.status-label');
+
+  // Operator & Authentication Controls
+  const btnOperatorSettings = document.getElementById('btn-operator-settings');
+  const headerOperatorId = document.getElementById('header-operator-id');
+  const authModal = document.getElementById('auth-modal');
+  const btnCloseAuthModal = document.getElementById('btn-close-auth-modal');
+  const btnCancelAuth = document.getElementById('btn-cancel-auth');
+  const btnSaveAuth = document.getElementById('btn-save-auth');
+  const settingOperatorId = document.getElementById('setting-operator-id');
+  const settingApiKey = document.getElementById('setting-api-key');
+
+  // Secondary Alert Filters
+  const alertCamFilter = document.getElementById('alert-cam-filter');
+  const alertTimeFilter = document.getElementById('alert-time-filter');
+  const alertSearchInput = document.getElementById('alert-search-input');
 
   // Stream tab
   const sourceTypeSeg  = document.getElementById('source-type-seg');
@@ -65,41 +88,113 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Zone draw tab
   const captureSource  = document.getElementById('zone-capture-source');
+  const zoneSourcePresets = document.getElementById('zone-source-presets');
   const btnCapture     = document.getElementById('btn-capture-frame');
+  const btnLivePreview = document.getElementById('btn-live-stream-preview');
   const zoneCameraId   = document.getElementById('zone-camera-id');
   const zoneZoneId     = document.getElementById('zone-zone-id');
+  const btnModeBox     = document.getElementById('btn-mode-box');
+  const btnModePoly    = document.getElementById('btn-mode-poly');
+  const btnPresetCenter = document.getElementById('btn-preset-center');
+  const btnPresetFloor = document.getElementById('btn-preset-floor');
   const zoneCanvas     = document.getElementById('zone-canvas');
   const canvasContainer = document.getElementById('canvas-container');
   const canvasPlaceholder = document.getElementById('canvas-placeholder');
+  const canvasHint     = document.getElementById('canvas-hint');
+  const zoneStatusBadge = document.getElementById('zone-status-badge');
   const btnZoneUndo    = document.getElementById('btn-zone-undo');
   const btnZoneClear   = document.getElementById('btn-zone-clear');
   const btnZoneSave    = document.getElementById('btn-zone-save');
+  const btnStartZoneDetect = document.getElementById('btn-start-zone-detect');
   const pointCount     = document.getElementById('zone-point-count');
   const zoneSaveResult = document.getElementById('zone-save-result');
   const zonesList      = document.getElementById('zones-list');
   const btnRefreshZones = document.getElementById('btn-refresh-zones');
 
   // =========================================================================
-  // State
+  // State & Authentication
   // =========================================================================
-  let activeAlerts     = [];
-  let currentFilter    = 'all';
-  let feedbackMap      = new Map();
-  let isConnected      = true;
-  let activeSourceType = 'webcam';
-  let activeMode       = 'ppe';
-  let isStreaming      = false;
-  let streamCameraId   = 'stream_cam_01';  // tracks the camera_id used for current stream
+  let activeAlerts      = [];
+  let currentFilter     = 'all';
+  let currentCamFilter  = 'all';
+  let currentTimeFilter = 'all';
+  let currentSearchQuery= '';
+  let feedbackMap       = new Map();
+  let isConnected       = true;
+  let activeSourceType  = 'webcam';
+  let activeMode        = 'all';
+  let isStreaming       = false;
+  let streamCameraId    = 'stream_cam_01';
+
+  // Operator & API Key Credentials
+  let operatorId = localStorage.getItem('aegis_operator_id') || 'op_admin';
+  let apiKey     = localStorage.getItem('aegis_api_key') || 'aegis-secret-key-2026';
+
+  if (headerOperatorId) headerOperatorId.textContent = operatorId;
+
+  function openAuthModal() {
+    if (!authModal) return;
+    if (settingOperatorId) settingOperatorId.value = operatorId;
+    if (settingApiKey) settingApiKey.value = apiKey;
+    authModal.style.display = 'flex';
+  }
+
+  function closeAuthModal() {
+    if (authModal) authModal.style.display = 'none';
+  }
+
+  btnOperatorSettings?.addEventListener('click', openAuthModal);
+  btnCloseAuthModal?.addEventListener('click', closeAuthModal);
+  btnCancelAuth?.addEventListener('click', closeAuthModal);
+
+  btnSaveAuth?.addEventListener('click', () => {
+    const newOp = (settingOperatorId?.value || '').trim() || 'op_admin';
+    const newKey = (settingApiKey?.value || '').trim() || 'aegis-secret-key-2026';
+    operatorId = newOp;
+    apiKey = newKey;
+    localStorage.setItem('aegis_operator_id', operatorId);
+    localStorage.setItem('aegis_api_key', apiKey);
+    if (headerOperatorId) headerOperatorId.textContent = operatorId;
+    closeAuthModal();
+    showToast(`Saved credentials for '${operatorId}'`, 'info');
+    fetchAlerts();
+  });
+
+  // Authenticated fetch wrapper injecting security headers
+  async function authFetch(url, options = {}) {
+    const headers = options.headers ? { ...options.headers } : {};
+    if (apiKey) {
+      headers['X-API-Key'] = apiKey;
+    }
+    if (operatorId) {
+      headers['X-Operator-ID'] = operatorId;
+    }
+    const mergedOptions = { ...options, headers };
+    const res = await fetch(url, mergedOptions);
+    if (res.status === 401) {
+      showToast('Authentication failed: Missing or invalid API key.', 'error');
+      openAuthModal();
+    }
+    return res;
+  }
 
   // Zone draw state
   let zonePoints       = [];            // [{x,y}] canvas-coordinate polygon points
-  let capturedImageData = null;         // ImageData or img element for background
+  let capturedImageData = null;
   let canvasCtx        = null;
+  let activeZoneType   = 'restricted';  // 'restricted' | 'warning' | 'custom'
+  let activeZoneColor  = '#ef4444';     // Red for danger
+  let drawMode         = 'box';         // 'box' | 'polygon'
+  let isDragging       = false;
+  let dragStart        = {x: 0, y: 0};
+  let dragCurrent      = {x: 0, y: 0};
+  let mouseHoverPoint  = null;
+  let isLivePreview    = false;
+  let livePreviewTimer = null;
 
   // =========================================================================
   // Dynamic API URL
   // =========================================================================
-  // Set default on load — phone on LAN automatically gets the right IP
   apiUrlInput.value = buildDefaultApiUrl();
 
   function getApiBase() {
@@ -107,17 +202,47 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
-  // Tab switching
+  // Live Preview Control & Tab switching
   // =========================================================================
+  function stopLivePreview() {
+    if (livePreviewTimer) {
+      clearInterval(livePreviewTimer);
+      livePreviewTimer = null;
+    }
+    isLivePreview = false;
+    if (btnLivePreview) {
+      btnLivePreview.classList.remove('active');
+      btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Live Preview`;
+    }
+    if (zoneStatusBadge && zoneCanvas && !zoneCanvas._imgElement) {
+      zoneStatusBadge.className = 'proc-badge badge-stopped';
+      zoneStatusBadge.textContent = 'READY';
+    }
+  }
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(c => {
+      c.classList.toggle('active', c.id === `tab-${tab}`);
+    });
+    if (tab !== 'zones') {
+      stopLivePreview();
+    }
+    if (tab === 'zones') loadZonesList();
+    if (tab === 'stream') loadZonesForStream();
+    if (tab === 'control') {
+      loadProcessStatus();
+      startProcessPolling();
+    } else {
+      stopProcessPolling();
+    }
+  }
+
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const tab = btn.getAttribute('data-tab');
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(`tab-${tab}`)?.classList.add('active');
-      if (tab === 'zones') loadZonesList();
-      if (tab === 'stream') loadZonesForStream();
+      switchTab(btn.getAttribute('data-tab'));
     });
   });
 
@@ -171,12 +296,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   async function fetchAlerts() {
     try {
-      const r = await fetch(`${getApiBase()}/alerts?limit=50`);
+      const r = await authFetch(`${getApiBase()}/alerts?limit=100`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       if (!Array.isArray(data)) throw new Error('Expected array');
+      // Show immediate notification when new alerts arrive
+      if (activeAlerts && activeAlerts.length > 0 && data.length > activeAlerts.length) {
+        const newest = data[0];
+        const label = (newest.class || newest.class_name || 'Safety violation').replace(/_/g, ' ').toUpperCase();
+        showToast(`🚨 ${label} detected on ${newest.camera_id}!`, 'error');
+      }
       activeAlerts = data;
       setStatus(true);
+      syncCameraFilterOptions();
       renderAlertFeed();
       updateStreamRecentEvents();
     } catch (e) {
@@ -185,9 +317,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function syncCameraFilterOptions() {
+    if (!alertCamFilter) return;
+    const currentVal = alertCamFilter.value;
+    const cameras = Array.from(new Set(activeAlerts.map(a => a.camera_id).filter(Boolean))).sort();
+    
+    // Preserve 'all' plus dynamic cameras
+    let html = '<option value="all">All Cameras</option>';
+    cameras.forEach(cam => {
+      html += `<option value="${cam}">${cam}</option>`;
+    });
+    alertCamFilter.innerHTML = html;
+    if (cameras.includes(currentVal)) {
+      alertCamFilter.value = currentVal;
+    } else {
+      alertCamFilter.value = 'all';
+    }
+  }
+
   async function fetchThresholds() {
     try {
-      const r = await fetch(`${getApiBase()}/thresholds`);
+      const r = await authFetch(`${getApiBase()}/thresholds`);
       if (!r.ok) return;
       renderThresholds(await r.json());
     } catch (_) {}
@@ -195,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchPolicyHistory() {
     try {
-      const r = await fetch(`${getApiBase()}/policy-history`);
+      const r = await authFetch(`${getApiBase()}/policy-history`);
       if (!r.ok) return;
       const h = await r.json();
       if (Array.isArray(h) && h.length > 0) headerPolicy.textContent = h[0].policy_version;
@@ -206,18 +356,46 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderAlertFeed() {
     if (!isConnected && activeAlerts.length === 0) { renderOffline(); return; }
 
-    const filtered = activeAlerts.filter(a =>
-      currentFilter === 'all' ? true : a.event_type === currentFilter
-    );
+    const now = Date.now();
+    const filtered = activeAlerts.filter(a => {
+      // 1. Event type filter
+      if (currentFilter !== 'all' && a.event_type !== currentFilter) return false;
+
+      // 2. Camera filter
+      if (currentCamFilter !== 'all' && a.camera_id !== currentCamFilter) return false;
+
+      // 3. Time window filter
+      if (currentTimeFilter !== 'all' && a.timestamp) {
+        const alertTime = new Date(a.timestamp).getTime();
+        const diffMinutes = (now - alertTime) / (1000 * 60);
+        if (currentTimeFilter === '15m' && diffMinutes > 15) return false;
+        if (currentTimeFilter === '1h' && diffMinutes > 60) return false;
+        if (currentTimeFilter === '24h' && diffMinutes > 1440) return false;
+      }
+
+      // 4. Keyword search filter
+      if (currentSearchQuery) {
+        const query = currentSearchQuery.toLowerCase();
+        const str = `${a.class || a.class_name || ''} ${a.zone_id || ''} ${a.camera_id || ''} ${a.tracked_id || ''}`.toLowerCase();
+        if (!str.includes(query)) return false;
+      }
+
+      return true;
+    });
+
     alertBadge.textContent = `${filtered.length} Alerts`;
 
     if (filtered.length === 0) {
       alertFeed.innerHTML = '';
-      alertFeed.appendChild(feedEmpty);
-      feedEmpty.style.display = 'block';
+      if (feedEmpty) {
+        feedEmpty.querySelector('h3').textContent = activeAlerts.length > 0 ? 'No Matching Alerts' : 'No Safety Alerts Detected';
+        feedEmpty.querySelector('p').textContent = activeAlerts.length > 0 ? 'Try changing your filter settings.' : 'Listening for edge detection events...';
+        feedEmpty.style.display = 'block';
+        alertFeed.appendChild(feedEmpty);
+      }
       return;
     }
-    feedEmpty.style.display = 'none';
+    if (feedEmpty) feedEmpty.style.display = 'none';
     alertFeed.innerHTML = '';
 
     filtered.forEach((alert, idx) => {
@@ -231,7 +409,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const typeLabel = isPpe ? 'PPE Violation' : (alert.event_type === 'zone_intrusion' ? 'Zone Intrusion' : 'Security Alert');
         const typeClass = isPpe ? 'type-ppe' : 'type-intrusion';
         const actionClass = alert.bandit_action === 'escalate' ? 'action-escalate' : 'action-log';
-        const fbState = feedbackMap.get(alert.event_id);
+        // Check persisted feedback from DB or local session cache
+        const fbState = alert.feedback || feedbackMap.get(alert.event_id);
         const rawClass = alert.class || alert.class_name || 'unknown';
         const dispClass = String(rawClass).replace(/_/g, ' ').toUpperCase();
 
@@ -253,10 +432,10 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <div class="alert-actions">
             ${fbState ? `<div class="feedback-status-badge ${fbState}">${fbState === 'confirmed' ? '✓ CONFIRMED' : '✗ FALSE ALARM'}</div>` : `
-              <button class="btn-feedback btn-confirm" onclick="submitFeedback('${alert.event_id}','confirmed')">
+              <button class="btn-feedback btn-confirm" aria-label="Confirm alert" onclick="submitFeedback('${alert.event_id}','confirmed')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Confirm
               </button>
-              <button class="btn-feedback btn-false-alarm" onclick="submitFeedback('${alert.event_id}','false_alarm')">
+              <button class="btn-feedback btn-false-alarm" aria-label="Mark false alarm" onclick="submitFeedback('${alert.event_id}','false_alarm')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>False Alarm
               </button>`}
           </div>`;
@@ -266,6 +445,22 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  // Filter event listeners
+  alertCamFilter?.addEventListener('change', () => {
+    currentCamFilter = alertCamFilter.value;
+    renderAlertFeed();
+  });
+
+  alertTimeFilter?.addEventListener('change', () => {
+    currentTimeFilter = alertTimeFilter.value;
+    renderAlertFeed();
+  });
+
+  alertSearchInput?.addEventListener('input', () => {
+    currentSearchQuery = alertSearchInput.value.trim();
+    renderAlertFeed();
+  });
 
   function renderThresholds(data) {
     if (!data || typeof data !== 'object') return;
@@ -299,13 +494,18 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       feedbackMap.set(eventId, fbType);
       renderAlertFeed();
-      const r = await fetch(`${getApiBase()}/feedback`, {
+      const r = await authFetch(`${getApiBase()}/feedback`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({event_id: eventId, feedback: fbType, operator_id: 'op_console_user', timestamp: new Date().toISOString()})
+        body: JSON.stringify({
+          event_id: eventId,
+          feedback: fbType,
+          operator_id: operatorId,
+          timestamp: new Date().toISOString()
+        })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      showToast(`Feedback '${fbType}' recorded`, 'info');
+      showToast(`Feedback '${fbType}' recorded by ${operatorId}`, 'info');
       fetchThresholds();
     } catch (e) {
       showToast(`Feedback failed: ${e.message}`, 'error');
@@ -331,13 +531,19 @@ document.addEventListener('DOMContentLoaded', () => {
       clip_captured: false
     };
     try {
-      const r = await fetch(`${getApiBase()}/events`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const r = await authFetch(`${getApiBase()}/events`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({detail: `HTTP ${r.status}`}));
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
       showToast(`Simulated ${isPpe ? 'PPE' : 'Zone'} event`, 'info');
       fetchAlerts();
     } catch (e) {
-      showToast(`Backend unreachable: ${e.message}`, 'error');
-      setStatus(false, e.message);
+      showToast(`Simulation failed: ${e.message}`, 'error');
     }
   }
 
@@ -358,7 +564,7 @@ document.addEventListener('DOMContentLoaded', () => {
       modeSeg.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       activeMode = btn.getAttribute('data-val');
-      zoneConfigGroup.style.display = activeMode === 'zone_intrusion' ? '' : 'none';
+      zoneConfigGroup.style.display = (activeMode === 'zone_intrusion' || activeMode === 'all') ? '' : 'none';
     });
   });
 
@@ -383,7 +589,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadZonesForStream() {
     try {
-      const r = await fetch(`${getApiBase()}/zones`);
+      const r = await authFetch(`${getApiBase()}/zones`);
       if (!r.ok) return;
       const zones = await r.json();
       streamZoneSelect.innerHTML = '';
@@ -404,10 +610,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Start / stop stream
   // =========================================================================
   btnStreamStart.addEventListener('click', async () => {
+    stopLivePreview();
     const source = sourceInput.value.trim();
     if (!source) { showToast('Enter a source first.', 'error'); return; }
 
-    const zoneConfigPath = activeMode === 'zone_intrusion' ? (streamZoneSelect.value || null) : null;
+    const zoneConfigPath = (activeMode === 'zone_intrusion' || activeMode === 'all') ? (streamZoneSelect.value || null) : null;
 
     streamCameraId = cameraIdInput.value.trim() || 'stream_cam_01';
 
@@ -426,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
     streamErrorBox.style.display = 'none';
 
     try {
-      const r = await fetch(`${getApiBase()}/stream/start`, {
+      const r = await authFetch(`${getApiBase()}/stream/start`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
@@ -437,19 +644,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       // Stream started — point <img> at the MJPEG endpoint
       isStreaming = true;
-      const mjpegUrl = `${getApiBase()}/stream/mjpeg`;
+      const mjpegUrl = `${getApiBase()}/stream/mjpeg?t=${Date.now()}`;
       streamImg.src = mjpegUrl;
       streamImg.style.display = 'block';
       streamPlaceholder.style.display = 'none';
       streamErrorBox.style.display = 'none';
       streamInfo.style.display = 'block';
       infoSource.textContent = source;
-      infoMode.textContent = activeMode === 'ppe' ? 'PPE Detection' : 'Zone Intrusion';
+      infoMode.textContent = activeMode === 'all' ? 'All-in-One (PPE + Zone)' : activeMode === 'ppe' ? 'PPE Detection' : 'Zone Intrusion';
       setStreamBadge('live');
       btnStreamStop.disabled = false;
       btnStreamStart.textContent = 'Restart Stream';
       btnStreamStart.disabled = false;
-      showToast('Stream started', 'info');
+      showToast('Stream started successfully', 'info');
     } catch (e) {
       streamErrorBox.textContent = `Could not start stream: ${e.message}`;
       streamErrorBox.style.display = 'block';
@@ -460,8 +667,11 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   btnStreamStop.addEventListener('click', async () => {
+    if (isStreaming && !confirm('Are you sure you want to stop the active live stream?')) {
+      return;
+    }
     try {
-      await fetch(`${getApiBase()}/stream/stop`, {method: 'POST'});
+      await authFetch(`${getApiBase()}/stream/stop`, {method: 'POST'});
     } catch (_) {}
     stopStreamUI();
     showToast('Stream stopped', 'info');
@@ -498,9 +708,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateStreamRecentEvents() {
     if (!streamRecentEvents || !isStreaming) return;
-    const recent = activeAlerts
-      .filter(a => a.camera_id === streamCameraId)
-      .slice(0, 4);
+    let recent = activeAlerts.filter(a => !streamCameraId || a.camera_id === streamCameraId).slice(0, 5);
+    if (recent.length === 0) {
+      recent = activeAlerts.slice(0, 5);
+    }
     streamRecentEvents.innerHTML = '';
     if (recent.length === 0) return;
     recent.forEach(a => {
@@ -518,48 +729,145 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   canvasCtx = zoneCanvas.getContext('2d');
 
+  function getCanvasCoords(e) {
+    const rect = zoneCanvas.getBoundingClientRect();
+    const scaleX = zoneCanvas.width / (rect.width || 1);
+    const scaleY = zoneCanvas.height / (rect.height || 1);
+    const rawX = (e.clientX - rect.left) * scaleX;
+    const rawY = (e.clientY - rect.top) * scaleY;
+    return {
+      x: Math.max(0, Math.min(zoneCanvas.width, Math.round(rawX))),
+      y: Math.max(0, Math.min(zoneCanvas.height, Math.round(rawY))),
+    };
+  }
+
+  // Camera source presets sync
+  if (zoneSourcePresets) {
+    zoneSourcePresets.addEventListener('change', () => {
+      if (zoneSourcePresets.value === 'custom') {
+        captureSource.focus();
+      } else {
+        captureSource.value = zoneSourcePresets.value;
+      }
+    });
+  }
+
+  // Zone type options (Red / Yellow / Blue)
+  document.querySelectorAll('.zone-type-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.zone-type-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      activeZoneType = pill.getAttribute('data-type') || 'restricted';
+      activeZoneColor = pill.getAttribute('data-color') || '#ef4444';
+      const presetId = pill.getAttribute('data-zoneid');
+      if (presetId) {
+        zoneZoneId.value = presetId;
+      }
+      redrawCanvas();
+    });
+  });
+
+  // Marking mode (Box vs Polygon)
+  if (btnModeBox) {
+    btnModeBox.addEventListener('click', () => {
+      drawMode = 'box';
+      btnModeBox.classList.add('active');
+      btnModePoly?.classList.remove('active');
+      if (canvasHint) canvasHint.textContent = 'Click & drag on the image to mark a restricted box';
+      mouseHoverPoint = null;
+      redrawCanvas();
+    });
+  }
+
+  if (btnModePoly) {
+    btnModePoly.addEventListener('click', () => {
+      drawMode = 'polygon';
+      btnModePoly.classList.add('active');
+      btnModeBox?.classList.remove('active');
+      if (canvasHint) canvasHint.textContent = 'Click on the image to add polygon boundary points';
+      redrawCanvas();
+    });
+  }
+
+  // Presets: Center Box & Floor Hazard
+  if (btnPresetCenter) {
+    btnPresetCenter.addEventListener('click', () => {
+      const w = zoneCanvas.width || 640;
+      const h = zoneCanvas.height || 480;
+      zonePoints = [
+        {x: Math.round(w * 0.25), y: Math.round(h * 0.25)},
+        {x: Math.round(w * 0.75), y: Math.round(h * 0.25)},
+        {x: Math.round(w * 0.75), y: Math.round(h * 0.75)},
+        {x: Math.round(w * 0.25), y: Math.round(h * 0.75)},
+      ];
+      updatePointCountUI();
+      redrawCanvas();
+      showToast('Center box marked! Click "Detect Anyone Who Enters" to start monitoring.', 'info');
+    });
+  }
+
+  if (btnPresetFloor) {
+    btnPresetFloor.addEventListener('click', () => {
+      const w = zoneCanvas.width || 640;
+      const h = zoneCanvas.height || 480;
+      zonePoints = [
+        {x: Math.round(w * 0.05), y: Math.round(h * 0.55)},
+        {x: Math.round(w * 0.95), y: Math.round(h * 0.55)},
+        {x: Math.round(w * 0.95), y: Math.round(h * 0.95)},
+        {x: Math.round(w * 0.05), y: Math.round(h * 0.95)},
+      ];
+      updatePointCountUI();
+      redrawCanvas();
+      showToast('Floor hazard area marked! Click "Detect Anyone Who Enters".', 'info');
+    });
+  }
+
+  function setupCanvasWithImage(img) {
+    const containerW = canvasContainer.clientWidth - 2;
+    const containerH = canvasContainer.clientHeight - 2;
+    const scale = Math.min(containerW / (img.width || 640), containerH / (img.height || 480), 1);
+    zoneCanvas.width  = Math.round((img.width || 640)  * scale);
+    zoneCanvas.height = Math.round((img.height || 480) * scale);
+    zoneCanvas._imgElement = img;
+    zoneCanvas._scale = scale;
+    zoneCanvas._naturalW = img.width || 640;
+    zoneCanvas._naturalH = img.height || 480;
+
+    canvasPlaceholder.style.display = 'none';
+    zoneCanvas.style.display = 'block';
+    if (zoneStatusBadge) {
+      zoneStatusBadge.className = 'proc-badge badge-running';
+      zoneStatusBadge.textContent = 'IMAGE READY';
+    }
+    redrawCanvas();
+  }
+
+  // Still Frame Capture
   btnCapture.addEventListener('click', async () => {
+    stopLivePreview();
     const src = captureSource.value.trim();
-    if (!src) { showToast('Enter a source.', 'error'); return; }
+    if (!src) { showToast('Enter a camera source.', 'error'); return; }
 
     btnCapture.disabled = true;
     btnCapture.textContent = 'Capturing…';
 
     try {
-      const r = await fetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
+      const r = await authFetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
       if (!r.ok) {
         const err = await r.json().catch(() => ({detail: `HTTP ${r.status}`}));
         throw new Error(err.detail || `HTTP ${r.status}`);
       }
 
-      const frameWidth  = r.headers.get('X-Frame-Width');
-      const frameHeight = r.headers.get('X-Frame-Height');
-
       const blob = await r.blob();
       const imgUrl = URL.createObjectURL(blob);
       const img = new Image();
       img.onload = () => {
-        // Fit canvas inside the container, preserving aspect ratio
-        const containerW = canvasContainer.clientWidth - 2;
-        const containerH = canvasContainer.clientHeight - 2;
-        const scale = Math.min(containerW / img.width, containerH / img.height, 1);
-        zoneCanvas.width  = Math.round(img.width  * scale);
-        zoneCanvas.height = Math.round(img.height * scale);
-        zoneCanvas._imgElement = img;
-        zoneCanvas._scale = scale;
-        zoneCanvas._naturalW = img.width;
-        zoneCanvas._naturalH = img.height;
-
-        canvasPlaceholder.style.display = 'none';
-        zoneCanvas.style.display = 'block';
-
-        // Clear polygon when a new frame is captured
+        setupCanvasWithImage(img);
         zonePoints = [];
         updatePointCountUI();
-        redrawCanvas();
-        showToast('Frame captured — click to add polygon points', 'info');
+        showToast('Frame captured — drag a box or click points to mark zone', 'info');
       };
-      img.onerror = () => { throw new Error('Could not decode captured image.'); };
+      img.onerror = () => { throw new Error('Could not decode captured frame.'); };
       img.src = imgUrl;
     } catch (e) {
       showToast(`Capture failed: ${e.message}`, 'error');
@@ -569,12 +877,108 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // Live Stream Preview
+  if (btnLivePreview) {
+    btnLivePreview.addEventListener('click', () => {
+      const src = captureSource.value.trim() || '0';
+      if (isLivePreview) {
+        // Stop preview
+        stopLivePreview();
+        showToast('Live preview paused — frame ready for marking', 'info');
+      } else {
+        // Start preview
+        isLivePreview = true;
+        btnLivePreview.classList.add('active');
+        btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>Pause Frame`;
+        if (zoneStatusBadge) {
+          zoneStatusBadge.className = 'proc-badge badge-running';
+          zoneStatusBadge.textContent = 'LIVE PREVIEW';
+        }
+
+        const grab = async () => {
+          if (!isLivePreview) return;
+          try {
+            const r = await authFetch(`${getApiBase()}/capture-frame?source=${encodeURIComponent(src)}`);
+            if (!r.ok) return;
+            const blob = await r.blob();
+            const imgUrl = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = () => {
+              setupCanvasWithImage(img);
+            };
+            img.src = imgUrl;
+          } catch (_) {}
+        };
+        grab();
+        livePreviewTimer = setInterval(grab, 600);
+        showToast('Live camera preview active — click Pause to freeze', 'info');
+      }
+    });
+  }
+
+  // Canvas Mouse Interactions (Drag Box + Click Points)
+  zoneCanvas.addEventListener('mousedown', e => {
+    if (!zoneCanvas._imgElement) {
+      showToast('Capture a frame or start Live Preview first.', 'info');
+      return;
+    }
+    if (drawMode === 'box') {
+      isDragging = true;
+      dragStart = getCanvasCoords(e);
+      dragCurrent = dragStart;
+    }
+  });
+
+  zoneCanvas.addEventListener('mousemove', e => {
+    const pt = getCanvasCoords(e);
+    if (isDragging && drawMode === 'box') {
+      dragCurrent = pt;
+      redrawCanvas();
+    } else if (drawMode === 'polygon' && zonePoints.length > 0) {
+      mouseHoverPoint = pt;
+      redrawCanvas();
+    }
+  });
+
+  window.addEventListener('mouseup', e => {
+    if (isDragging && drawMode === 'box') {
+      isDragging = false;
+      const pt = getCanvasCoords(e);
+      const x1 = Math.min(dragStart.x, pt.x);
+      const x2 = Math.max(dragStart.x, pt.x);
+      const y1 = Math.min(dragStart.y, pt.y);
+      const y2 = Math.max(dragStart.y, pt.y);
+      if ((x2 - x1) >= 15 && (y2 - y1) >= 15) {
+        zonePoints = [
+          {x: x1, y: y1},
+          {x: x2, y: y1},
+          {x: x2, y: y2},
+          {x: x1, y: y2},
+        ];
+        updatePointCountUI();
+        redrawCanvas();
+        showToast(`Marked ${zoneZoneId.value} restricted zone! Click "Detect Anyone Who Enters".`, 'info');
+      }
+    }
+  });
+
   zoneCanvas.addEventListener('click', e => {
-    if (!zoneCanvas._imgElement) return;
-    const rect = zoneCanvas.getBoundingClientRect();
-    const x = Math.round(e.clientX - rect.left);
-    const y = Math.round(e.clientY - rect.top);
-    zonePoints.push({x, y});
+    if (drawMode !== 'polygon') return;
+    if (!zoneCanvas._imgElement) {
+      showToast('Capture a frame or start Live Preview first.', 'info');
+      return;
+    }
+    const pt = getCanvasCoords(e);
+    if (zonePoints.length >= 3) {
+      const d0 = Math.hypot(pt.x - zonePoints[0].x, pt.y - zonePoints[0].y);
+      if (d0 < 22) {
+        showToast('Polygon boundary closed!', 'info');
+        mouseHoverPoint = null;
+        redrawCanvas();
+        return;
+      }
+    }
+    zonePoints.push(pt);
     updatePointCountUI();
     redrawCanvas();
   });
@@ -584,56 +988,110 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctx = canvasCtx;
     ctx.clearRect(0, 0, zoneCanvas.width, zoneCanvas.height);
 
-    // Draw background image
+    // Draw background video frame
     ctx.drawImage(zoneCanvas._imgElement, 0, 0, zoneCanvas.width, zoneCanvas.height);
+
+    const mainColor = activeZoneColor || '#ef4444';
+
+    // 1. Draw Dragging Box Preview
+    if (isDragging && drawMode === 'box') {
+      const x1 = Math.min(dragStart.x, dragCurrent.x);
+      const y1 = Math.min(dragStart.y, dragCurrent.y);
+      const w = Math.abs(dragCurrent.x - dragStart.x);
+      const h = Math.abs(dragCurrent.y - dragStart.y);
+
+      ctx.fillStyle = activeZoneType === 'restricted' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(251, 191, 36, 0.25)';
+      ctx.fillRect(x1, y1, w, h);
+
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x1, y1, w, h);
+      ctx.setLineDash([]);
+
+      // Label with dimensions
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillText(`${w}x${h}px`, x1 + 6, y1 + 16);
+      return;
+    }
 
     if (zonePoints.length === 0) return;
 
-    // Fill semi-transparent polygon
+    // 2. Fill Semi-transparent Zone
     if (zonePoints.length >= 3) {
       ctx.beginPath();
       ctx.moveTo(zonePoints[0].x, zonePoints[0].y);
       zonePoints.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
       ctx.closePath();
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.15)';
+      ctx.fillStyle = activeZoneType === 'restricted' ? 'rgba(239, 68, 68, 0.22)' : 'rgba(251, 191, 36, 0.22)';
       ctx.fill();
     }
 
-    // Draw edges
+    // 3. Draw Polygon Edges
     ctx.beginPath();
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = mainColor;
+    ctx.lineWidth = 2.5;
     ctx.setLineDash([]);
     ctx.moveTo(zonePoints[0].x, zonePoints[0].y);
     zonePoints.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+
     if (zonePoints.length >= 3) {
       ctx.setLineDash([5, 4]);
-      ctx.lineTo(zonePoints[0].x, zonePoints[0].y);  // closing edge preview dashed
+      ctx.lineTo(zonePoints[0].x, zonePoints[0].y);
       ctx.setLineDash([]);
     }
     ctx.stroke();
 
-    // Draw vertices
+    // 4. Polygon Guide line to mouse
+    if (drawMode === 'polygon' && mouseHoverPoint && zonePoints.length > 0) {
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.lineWidth = 1.5;
+      const last = zonePoints[zonePoints.length - 1];
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(mouseHoverPoint.x, mouseHoverPoint.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 5. Draw Vertices
     zonePoints.forEach((p, i) => {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = i === 0 ? '#10b981' : '#38bdf8';
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? '#10b981' : mainColor;
       ctx.fill();
       ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2;
       ctx.stroke();
-      // Index label
+
+      // Vertex Index label
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 11px Inter, sans-serif';
-      ctx.fillText(i + 1, p.x + 7, p.y - 5);
+      ctx.fillText(i + 1, p.x + 8, p.y - 6);
     });
+
+    // 6. Zone Name Label
+    if (zonePoints.length >= 1) {
+      const p0 = zonePoints[0];
+      const zName = zoneZoneId.value.trim() || 'RESTRICTED ZONE';
+      ctx.fillStyle = mainColor;
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(p0.x, Math.max(10, p0.y - 28), ctx.measureText(zName).width + 16, 20, 4) : ctx.rect(p0.x, Math.max(10, p0.y - 28), ctx.measureText(zName).width + 16, 20);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillText(zName, p0.x + 8, Math.max(24, p0.y - 14));
+    }
   }
 
   function updatePointCountUI() {
-    pointCount.textContent = zonePoints.length;
-    btnZoneUndo.disabled = zonePoints.length === 0;
-    btnZoneClear.disabled = zonePoints.length === 0;
-    btnZoneSave.disabled = zonePoints.length < 3;
+    if (pointCount) pointCount.textContent = zonePoints.length;
+    if (btnZoneUndo) btnZoneUndo.disabled = zonePoints.length === 0;
+    if (btnZoneClear) btnZoneClear.disabled = zonePoints.length === 0;
+    if (btnZoneSave) btnZoneSave.disabled = zonePoints.length < 3;
+    if (btnStartZoneDetect) btnStartZoneDetect.disabled = zonePoints.length < 3;
   }
 
   btnZoneUndo.addEventListener('click', () => {
@@ -648,20 +1106,20 @@ document.addEventListener('DOMContentLoaded', () => {
     redrawCanvas();
   });
 
-  btnZoneSave.addEventListener('click', async () => {
-    if (zonePoints.length < 3) return;
+  // Save Zone Helper Function
+  async function saveCurrentZone() {
+    if (zonePoints.length < 3) return null;
     const camId  = zoneCameraId.value.trim() || 'cam_01';
-    const zoneId = zoneZoneId.value.trim()   || 'zone_1';
+    const zoneId = zoneZoneId.value.trim()   || 'zone_red_1';
     const scale  = zoneCanvas._scale || 1;
 
-    // Convert canvas coordinates back to native pixel coordinates
     const nativePolygon = zonePoints.map(p => [
       Math.round(p.x / scale),
       Math.round(p.y / scale),
     ]);
 
     try {
-      const r = await fetch(`${getApiBase()}/zones`, {
+      const r = await authFetch(`${getApiBase()}/zones`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
@@ -680,26 +1138,86 @@ document.addEventListener('DOMContentLoaded', () => {
       zoneSaveResult.style.display = 'block';
       zoneSaveResult.className = 'zone-save-result success';
       zoneSaveResult.innerHTML = `<strong>Zone saved:</strong> ${saved.filename}<br><span style="font-size:11px;color:var(--text-dim);">${saved.point_count} points · ${camId} / ${zoneId}</span>`;
-      showToast(`Zone '${zoneId}' saved`, 'info');
+      showToast(`Zone '${zoneId}' saved successfully`, 'info');
       loadZonesList();
+      return saved;
     } catch (e) {
       zoneSaveResult.style.display = 'block';
       zoneSaveResult.className = 'zone-save-result error';
       zoneSaveResult.textContent = `Save failed: ${e.message}`;
+      return null;
     }
+  }
+
+  btnZoneSave.addEventListener('click', async () => {
+    await saveCurrentZone();
   });
 
-  // =========================================================================
-  // Zone list
-  // =========================================================================
+  // "Detect Anyone Who Enters" - Complete Workflow
+  if (btnStartZoneDetect) {
+    btnStartZoneDetect.addEventListener('click', async () => {
+      if (zonePoints.length < 3) {
+        showToast('Please mark at least 3 points or drag a box first.', 'error');
+        return;
+      }
+
+      btnStartZoneDetect.disabled = true;
+      btnStartZoneDetect.textContent = 'Configuring Intrusion Detection…';
+
+      // Stop any lingering camera polling
+      stopLivePreview();
+
+      // 1. Save zone
+      const saved = await saveCurrentZone();
+      if (!saved) {
+        btnStartZoneDetect.disabled = false;
+        btnStartZoneDetect.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>Detect Anyone Who Enters`;
+        return;
+      }
+
+      showToast(`Zone saved! Launching intrusion detection on ${saved.zone_id}...`, 'info');
+
+      // 2. Switch to Live Stream tab
+      switchTab('stream');
+
+      // 3. Switch mode to Zone Intrusion
+      activeMode = 'zone_intrusion';
+      if (modeSeg) {
+        modeSeg.querySelectorAll('.seg-btn').forEach(b => {
+          b.classList.toggle('active', b.getAttribute('data-val') === 'zone_intrusion');
+        });
+      }
+      if (zoneConfigGroup) zoneConfigGroup.style.display = '';
+
+      // 4. Configure camera source & camera ID
+      if (sourceInput) sourceInput.value = captureSource.value.trim() || '0';
+      if (cameraIdInput) cameraIdInput.value = zoneCameraId.value.trim() || 'cam_01';
+      if (zoneIdInput) zoneIdInput.value = zoneZoneId.value.trim() || 'zone_red_1';
+
+      // 5. Refresh zones dropdown and select newly saved zone
+      await loadZonesForStream();
+      if (streamZoneSelect && saved.file_path) {
+        streamZoneSelect.value = saved.file_path;
+      }
+
+      // 6. Launch Live Stream
+      setTimeout(() => {
+        btnStreamStart.click();
+        btnStartZoneDetect.disabled = false;
+        btnStartZoneDetect.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>Detect Anyone Who Enters`;
+      }, 350);
+    });
+  }
+
+  // Saved zones list loader
   async function loadZonesList() {
     try {
-      const r = await fetch(`${getApiBase()}/zones`);
+      const r = await authFetch(`${getApiBase()}/zones`);
       if (!r.ok) { zonesList.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">Could not load zones.</p>'; return; }
       const zones = await r.json();
       zonesList.innerHTML = '';
       if (zones.length === 0) {
-        zonesList.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">No saved zones yet. Draw one above.</p>';
+        zonesList.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">No saved zones yet. Mark one above.</p>';
         return;
       }
       zones.forEach(z => {
@@ -711,17 +1229,87 @@ document.addEventListener('DOMContentLoaded', () => {
             <span class="zone-list-meta">${z.camera_id} · ${z.point_count} pts</span>
             <span class="zone-list-file">${z.filename}</span>
           </div>
-          <button class="btn-icon zone-delete-btn" title="Delete zone" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-            </svg>
-          </button>`;
+          <div class="zone-list-actions">
+            <button class="btn-zone-action-load" title="Load and view on canvas" data-poly='${JSON.stringify(z.polygon || [])}' data-cam="${z.camera_id}" data-zone="${z.zone_id}">
+              Load
+            </button>
+            <button class="btn-zone-action-detect" title="Run live intrusion detection" data-file="${z.file_path}" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
+              ▶ Detect
+            </button>
+            <button class="btn-icon zone-delete-btn" title="Delete zone" aria-label="Delete zone" data-cam="${z.camera_id}" data-zone="${z.zone_id}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+              </svg>
+            </button>
+          </div>`;
+
+        // Load onto canvas
+        el.querySelector('.btn-zone-action-load').addEventListener('click', e => {
+          const polyStr = e.currentTarget.getAttribute('data-poly');
+          const cam = e.currentTarget.getAttribute('data-cam');
+          const zone = e.currentTarget.getAttribute('data-zone');
+          try {
+            const poly = JSON.parse(polyStr);
+            if (!Array.isArray(poly) || poly.length === 0) {
+              showToast('No polygon coordinates stored in this zone file.', 'error');
+              return;
+            }
+            const scale = zoneCanvas._scale || 1;
+            zonePoints = poly.map(pt => ({
+              x: Math.round(pt[0] * scale),
+              y: Math.round(pt[1] * scale),
+            }));
+            zoneCameraId.value = cam;
+            zoneZoneId.value = zone;
+            updatePointCountUI();
+            redrawCanvas();
+            showToast(`Loaded zone '${zone}' (${poly.length} pts) onto canvas`, 'info');
+          } catch (err) {
+            showToast('Could not load polygon coordinates', 'error');
+          }
+        });
+
+        // Run detection directly
+        el.querySelector('.btn-zone-action-detect').addEventListener('click', async e => {
+          stopLivePreview();
+          const file = e.currentTarget.getAttribute('data-file');
+          const cam = e.currentTarget.getAttribute('data-cam');
+          const zone = e.currentTarget.getAttribute('data-zone');
+
+          // Switch to Live Stream
+          switchTab('stream');
+
+          activeMode = 'zone_intrusion';
+          if (modeSeg) {
+            modeSeg.querySelectorAll('.seg-btn').forEach(b => {
+              b.classList.toggle('active', b.getAttribute('data-val') === 'zone_intrusion');
+            });
+          }
+          if (zoneConfigGroup) zoneConfigGroup.style.display = '';
+
+          if (sourceInput) sourceInput.value = captureSource.value.trim() || '0';
+          if (cameraIdInput) cameraIdInput.value = cam;
+          if (zoneIdInput) zoneIdInput.value = zone;
+
+          await loadZonesForStream();
+          if (streamZoneSelect && file) {
+            streamZoneSelect.value = file;
+          }
+
+          setTimeout(() => {
+            btnStreamStart.click();
+          }, 300);
+        });
+
+        // Delete zone with confirmation
         el.querySelector('.zone-delete-btn').addEventListener('click', async e => {
           const cam  = e.currentTarget.getAttribute('data-cam');
           const zone = e.currentTarget.getAttribute('data-zone');
-          if (!confirm(`Delete zone '${zone}' on '${cam}'?`)) return;
+          if (!confirm(`Are you sure you want to permanently delete zone '${zone}' on camera '${cam}'? This cannot be undone.`)) {
+            return;
+          }
           try {
-            const dr = await fetch(`${getApiBase()}/zones/${encodeURIComponent(cam)}/${encodeURIComponent(zone)}`, {method: 'DELETE'});
+            const dr = await authFetch(`${getApiBase()}/zones/${encodeURIComponent(cam)}/${encodeURIComponent(zone)}`, {method: 'DELETE'});
             if (!dr.ok) throw new Error(`HTTP ${dr.status}`);
             showToast(`Zone '${zone}' deleted`, 'info');
             loadZonesList();
@@ -729,6 +1317,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast(`Delete failed: ${err.message}`, 'error');
           }
         });
+
         zonesList.appendChild(el);
       });
     } catch (e) {
@@ -755,6 +1344,318 @@ document.addEventListener('DOMContentLoaded', () => {
   btnSimZone.addEventListener('click', () => simulateEvent('zone_intrusion'));
 
   // =========================================================================
+  // Control Panel (Subprocess Orchestration) Logic
+  // =========================================================================
+  let procPollTimer = null;
+  const openLogsMap = new Set(); // tracks process names with expanded log viewers
+  const lastKnownStatus = new Map();
+
+  function formatTime(isoStr) {
+    if (!isoStr) return '—';
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return isoStr;
+    }
+  }
+
+  function updateProcessCardUI(proc) {
+    const name = proc.name;
+    const card = document.getElementById(`proc-card-${name}`);
+    const dot = document.getElementById(`proc-dot-${name}`);
+    const badge = document.getElementById(`proc-badge-${name}`);
+    const btnStart = document.getElementById(`btn-start-${name}`);
+    const btnStop = document.getElementById(`btn-stop-${name}`);
+    const pidsEl = document.getElementById(`proc-pids-${name}`);
+    const timeEl = document.getElementById(`proc-time-${name}`);
+    const logCountEl = document.getElementById(`proc-logcount-${name}`);
+    const pollInd = document.getElementById(`proc-poll-${name}`);
+    const logBody = document.getElementById(`proc-logs-body-${name}`);
+    const chevron = document.getElementById(`chevron-${name}`);
+
+    if (!card) return;
+
+    const prevStatus = lastKnownStatus.get(name);
+    lastKnownStatus.set(name, proc.status);
+
+    // If newly crashed, auto-open log viewer so the user sees error output immediately
+    if (proc.status === 'crashed' && prevStatus !== 'crashed') {
+      openLogsMap.add(name);
+      if (logBody) logBody.classList.add('open');
+      if (chevron) chevron.classList.add('rotated');
+      fetchProcessLogs(name);
+    }
+
+    // Status classes
+    card.classList.remove('is-running', 'is-crashed');
+    if (proc.status === 'running') card.classList.add('is-running');
+    if (proc.status === 'crashed') card.classList.add('is-crashed');
+
+    // Dot & Badge styling
+    if (dot) {
+      dot.className = `proc-dot status-dot-${proc.status}`;
+    }
+    if (badge) {
+      badge.className = `proc-badge badge-${proc.status}`;
+      badge.textContent = proc.status.toUpperCase();
+    }
+
+    // Buttons
+    if (btnStart) btnStart.disabled = (proc.status === 'running');
+    if (btnStop) btnStop.disabled = (proc.status !== 'running');
+
+    // Meta
+    if (pidsEl) {
+      pidsEl.textContent = (proc.pids && proc.pids.length > 0) ? proc.pids.join(', ') : '—';
+    }
+    if (timeEl) {
+      timeEl.textContent = formatTime(proc.started_at);
+    }
+    if (logCountEl && typeof proc.logs_count === 'number') {
+      logCountEl.textContent = proc.logs_count;
+    }
+
+    // Polling indicator
+    if (pollInd) {
+      pollInd.style.display = (proc.status === 'running' && openLogsMap.has(name)) ? 'flex' : 'none';
+    }
+  }
+
+  async function loadProcessStatus() {
+    try {
+      const res = await authFetch(`${getApiBase()}/processes`);
+      if (!res.ok) return;
+      const procs = await res.json();
+      procs.forEach(p => {
+        updateProcessCardUI(p);
+        // If logs section is open or process is running, fetch latest logs
+        if (openLogsMap.has(p.name) || p.status === 'running') {
+          fetchProcessLogs(p.name);
+        }
+      });
+    } catch (e) {
+      console.warn('Failed to load process status:', e);
+    }
+  }
+
+  async function fetchProcessLogs(name) {
+    try {
+      const res = await authFetch(`${getApiBase()}/processes/${name}/logs?tail=500`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const pre = document.getElementById(`proc-logs-${name}`);
+      const logBody = document.getElementById(`proc-logs-body-${name}`);
+      const logCountEl = document.getElementById(`proc-logcount-${name}`);
+
+      if (logCountEl && Array.isArray(data.logs)) {
+        logCountEl.textContent = data.logs.length;
+      }
+
+      if (pre && Array.isArray(data.logs)) {
+        const text = data.logs.length > 0 ? data.logs.join('\n') : '(No logs recorded)';
+        // Check if user was already at bottom before appending to keep auto-scrolling
+        const isNearBottom = logBody ? (logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight < 60) : false;
+        pre.textContent = text;
+        if (isNearBottom && logBody) {
+          logBody.scrollTop = logBody.scrollHeight;
+        }
+      }
+    } catch (e) {
+      console.warn(`Failed to fetch logs for ${name}:`, e);
+    }
+  }
+
+  function startProcessPolling() {
+    if (procPollTimer) clearInterval(procPollTimer);
+    procPollTimer = setInterval(loadProcessStatus, 1500);
+  }
+
+  function stopProcessPolling() {
+    if (procPollTimer) {
+      clearInterval(procPollTimer);
+      procPollTimer = null;
+    }
+  }
+
+  // Bind Start buttons
+  document.querySelectorAll('.btn-proc-start').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+
+      btn.disabled = true;
+      let bodyData = null;
+
+      if (name === 'zone_pipeline') {
+        const srcInput = document.getElementById('zone-proc-source');
+        const sourceVal = srcInput ? srcInput.value.trim() : 'demo/videos/zone_intrusion_demo.mp4';
+        bodyData = JSON.stringify({ source: sourceVal });
+      }
+
+      try {
+        const res = await authFetch(`${getApiBase()}/processes/${name}/start`, {
+          method: 'POST',
+          headers: bodyData ? { 'Content-Type': 'application/json' } : {},
+          body: bodyData,
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(`Start failed: ${err.detail || res.statusText}`, 'error');
+          btn.disabled = false;
+          return;
+        }
+
+        const data = await res.json();
+        updateProcessCardUI(data);
+
+        // Auto-open logs panel so operator sees immediate progress
+        openLogsMap.add(name);
+        const logBody = document.getElementById(`proc-logs-body-${name}`);
+        const chevron = document.getElementById(`chevron-${name}`);
+        if (logBody) logBody.classList.add('open');
+        if (chevron) chevron.classList.add('rotated');
+
+        showToast(`Process ${name} launched`, 'info');
+        loadProcessStatus();
+      } catch (e) {
+        showToast(`Error starting process: ${e.message}`, 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // Bind Stop buttons
+  document.querySelectorAll('.btn-proc-stop').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+
+      const confirmStop = confirm(`Are you sure you want to stop process "${name}"? Any active edge tasks or learning runs will be halted.`);
+      if (!confirmStop) return;
+
+      btn.disabled = true;
+      try {
+        const res = await authFetch(`${getApiBase()}/processes/${name}/stop`, {
+          method: 'POST',
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          showToast(`Stop failed: ${err.detail || res.statusText}`, 'error');
+          btn.disabled = false;
+          return;
+        }
+        const data = await res.json();
+        updateProcessCardUI(data);
+        showToast(`Process ${name} stopped`, 'info');
+        loadProcessStatus();
+      } catch (e) {
+        showToast(`Error stopping process: ${e.message}`, 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // Bind Log Toggle buttons
+  document.querySelectorAll('.btn-toggle-logs').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+      const logBody = document.getElementById(`proc-logs-body-${name}`);
+      const chevron = document.getElementById(`chevron-${name}`);
+
+      if (!logBody) return;
+      if (logBody.classList.contains('open')) {
+        logBody.classList.remove('open');
+        if (chevron) chevron.classList.remove('rotated');
+        openLogsMap.delete(name);
+      } else {
+        logBody.classList.add('open');
+        if (chevron) chevron.classList.add('rotated');
+        openLogsMap.add(name);
+        fetchProcessLogs(name);
+        // Scroll to bottom on open
+        setTimeout(() => { logBody.scrollTop = logBody.scrollHeight; }, 50);
+      }
+      loadProcessStatus();
+    });
+  });
+
+  // Bind Copy Log buttons
+  document.querySelectorAll('.btn-copy-logs').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = btn.getAttribute('data-proc');
+      if (!name) return;
+      const pre = document.getElementById(`proc-logs-${name}`);
+      if (pre && pre.textContent) {
+        navigator.clipboard.writeText(pre.textContent).then(() => {
+          showToast(`Copied ${name} logs to clipboard`, 'info');
+        }).catch(() => {
+          showToast('Failed to copy to clipboard', 'error');
+        });
+      }
+    });
+  });
+
+  // Sync Zone Source Dropdown & Input
+  const zoneSourceSelect = document.getElementById('zone-proc-source-select');
+  const zoneSourceInput = document.getElementById('zone-proc-source');
+  if (zoneSourceSelect && zoneSourceInput) {
+    zoneSourceSelect.addEventListener('change', () => {
+      if (zoneSourceSelect.value === 'custom') {
+        zoneSourceInput.focus();
+      } else {
+        zoneSourceInput.value = zoneSourceSelect.value;
+      }
+    });
+  }
+
+  // Refresh process list button
+  const btnRefreshProcs = document.getElementById('btn-refresh-procs');
+  if (btnRefreshProcs) {
+    btnRefreshProcs.addEventListener('click', loadProcessStatus);
+  }
+
+  // Retention Cleanup Button
+  const btnRunRetention = document.getElementById('btn-run-retention-cleanup');
+  if (btnRunRetention) {
+    btnRunRetention.addEventListener('click', async () => {
+      const confirmed = confirm('Run data retention cleanup now? This permanently deletes saved video clips older than 7 days and events older than 30 days.');
+      if (!confirmed) return;
+
+      btnRunRetention.disabled = true;
+      btnRunRetention.textContent = 'Pruning...';
+      try {
+        const res = await authFetch(`${getApiBase()}/retention/cleanup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || res.statusText);
+        }
+        const data = await res.json();
+        showToast(`Retention cleanup completed: ${data.events_pruned} events, ${data.clips_pruned} clips pruned (${data.bytes_reclaimed_mb} MB reclaimed)`, 'success');
+        const statusLabel = document.getElementById('retention-status-label');
+        if (statusLabel) {
+          statusLabel.textContent = `Cleaned at ${new Date().toLocaleTimeString()} (${data.events_pruned} ev, ${data.clips_pruned} clips)`;
+        }
+        fetchAlerts();
+      } catch (e) {
+        showToast(`Retention cleanup failed: ${e.message}`, 'error');
+      } finally {
+        btnRunRetention.disabled = false;
+        btnRunRetention.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Prune Aged Data Now`;
+      }
+    });
+  }
+
+  // Initial process status check
+  loadProcessStatus();
+
+  // =========================================================================
   // Polling loop
   // =========================================================================
   fetchAlerts();
@@ -762,3 +1663,4 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchPolicyHistory();
   setInterval(() => { fetchAlerts(); fetchThresholds(); }, 2000);
 });
+

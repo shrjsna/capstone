@@ -1,0 +1,24 @@
+{
+  "camera_id": "cam_01",
+  "zone_id": "zone_red_1",
+  "polygon": [
+    [
+      36,
+      58
+    ],
+    [
+      590,
+      58
+    ],
+    [
+      590,
+      450
+    ],
+    [
+      36,
+      450
+    ]
+  ],
+  "frame_width": 640,
+  "frame_height": 480
+}

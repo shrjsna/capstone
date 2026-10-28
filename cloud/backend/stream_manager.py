@@ -159,10 +159,15 @@ class StreamState:
 
 # Module-level singleton — one stream at a time
 _stream_state = StreamState()
+_capture_lock = threading.Lock()
 
 
 def get_stream_state() -> StreamState:
     return _stream_state
+
+
+def get_capture_lock() -> threading.Lock:
+    return _capture_lock
 
 
 # ---------------------------------------------------------------------------
@@ -173,13 +178,11 @@ def _draw_ppe_annotations(frame, boxes, model_names: Dict[int, str]) -> List[Dic
     """Draw PPE violation boxes on frame, return list of detection dicts."""
     cv2 = _get_cv2()
     detections = []
-    if boxes is None or boxes.id is None:
+    if boxes is None or len(boxes) == 0:
         return detections
 
-    for box in boxes:
-        track_id = int(box.id[0].item()) if box.id is not None else None
-        if track_id is None:
-            continue
+    for i, box in enumerate(boxes):
+        track_id = int(box.id[0].item()) if (box.id is not None and len(box.id) > 0) else (i + 1)
         cls_id = int(box.cls[0].item())
         confidence = float(box.conf[0].item())
         class_name = model_names.get(cls_id, f"class_{cls_id}")
@@ -206,37 +209,55 @@ def _draw_ppe_annotations(frame, boxes, model_names: Dict[int, str]) -> List[Dic
 
 
 def _draw_zone_annotations(frame, zone_config: Dict, boxes,
-                            frame_counts: Dict) -> List[Dict]:
+                            frame_counts: Dict,
+                            person_cls_id: Optional[int] = None) -> List[Dict]:
     """Draw zone polygon + tracked persons, return in-zone detection dicts."""
     cv2 = _get_cv2()
     detections = []
 
-    # Draw zone polygon (cyan: BGR 251,191,36 → actually use cyan 255,230,0)
-    polygon = zone_config.get("polygon", [])
-    if polygon:
-        pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
-        cv2.polylines(frame, [pts], isClosed=True, color=(0, 230, 255), thickness=2)
-        # Semi-transparent fill
-        overlay = frame.copy()
-        cv2.fillPoly(overlay, [pts], color=(0, 230, 255))
-        cv2.addWeighted(overlay, 0.08, frame, 0.92, 0, frame)
-        # Label
-        if polygon:
-            lx, ly = polygon[0]
-            cv2.putText(frame, zone_config.get("zone_id", "zone"),
-                        (lx, max(ly - 6, 14)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 230, 255), 1, cv2.LINE_AA)
-
-    if boxes is None or boxes.id is None:
+    h, w = frame.shape[:2]
+    orig_polygon = zone_config.get("polygon", [])
+    if not orig_polygon:
         return detections
 
-    track_ids = boxes.id.int().tolist()
-    confidences = boxes.conf.tolist()
-    xyxy_list = boxes.xyxy.tolist()
+    cfg_w = zone_config.get("frame_width")
+    cfg_h = zone_config.get("frame_height")
+    if cfg_w and cfg_h and (cfg_w != w or cfg_h != h):
+        scale_x = w / float(cfg_w)
+        scale_y = h / float(cfg_h)
+        polygon = [[int(pt[0] * scale_x), int(pt[1] * scale_y)] for pt in orig_polygon]
+    else:
+        polygon = orig_polygon
 
-    for tid, conf, xyxy in zip(track_ids, confidences, xyxy_list):
+    active_cfg = dict(zone_config)
+    active_cfg["polygon"] = polygon
+
+    # Draw zone polygon (cyan: BGR 0,230,255)
+    pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
+    cv2.polylines(frame, [pts], isClosed=True, color=(0, 230, 255), thickness=2)
+    # Semi-transparent fill
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [pts], color=(0, 230, 255))
+    cv2.addWeighted(overlay, 0.08, frame, 0.92, 0, frame)
+    # Label
+    lx, ly = polygon[0]
+    cv2.putText(frame, zone_config.get("zone_id", "zone"),
+                (lx, max(ly - 6, 14)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 230, 255), 1, cv2.LINE_AA)
+
+    if boxes is None or len(boxes) == 0:
+        return detections
+
+    for i, box in enumerate(boxes):
+        cls_id = int(box.cls[0].item())
+        if person_cls_id is not None and cls_id != person_cls_id:
+            continue
+
+        tid = int(box.id[0].item()) if (box.id is not None and len(box.id) > 0) else (i + 1)
+        conf = float(box.conf[0].item())
+        xyxy = box.xyxy[0].tolist()
         x1, y1, x2, y2 = [int(v) for v in xyxy]
-        in_zone = check_box_in_zone(xyxy, zone_config) if _ZONE_SUPPORT else False
+        in_zone = check_box_in_zone(xyxy, active_cfg) if _ZONE_SUPPORT else False
 
         key = (tid, "person")
         if in_zone:
@@ -251,12 +272,11 @@ def _draw_zone_annotations(frame, zone_config: Dict, boxes,
         cv2.putText(frame, f"id:{tid} {in_label}", (x1, max(y1 - 6, 14)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
 
-        if in_zone:
-            detections.append({
-                "track_id": tid,
-                "confidence": conf,
-                "in_zone": True,
-            })
+        detections.append({
+            "track_id": tid,
+            "confidence": conf,
+            "in_zone": in_zone,
+        })
 
     return detections
 
@@ -277,7 +297,8 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
     logger.info("[stream] Opening source: %s", source)
 
     # --- Open capture ---
-    cap = cv2.VideoCapture(source)
+    with _capture_lock:
+        cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         msg = f"Could not open source: {source_raw!r}. Check the URL/path/index."
         logger.error("[stream] %s", msg)
@@ -298,35 +319,29 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
         cap.release()
         return
 
-    # --- Zone config (if zone_intrusion mode) ---
+    # --- Zone config (if zone_intrusion or combined mode) ---
     zone_config: Optional[Dict] = None
     zone_debouncer = None
-    if state.mode == "zone_intrusion":
-        if not _ZONE_SUPPORT:
-            state.set_error("Zone intrusion modules not available on this installation.")
-            state.set_running(False)
-            cap.release()
-            return
-        if state.zone_config_path:
-            try:
-                zone_config = load_zone_config(state.zone_config_path)
-                logger.info("[stream] Zone config loaded: %s", state.zone_config_path)
-            except Exception as exc:
-                msg = f"Failed to load zone config {state.zone_config_path!r}: {exc}"
-                logger.error("[stream] %s", msg)
-                state.set_error(msg)
-                state.set_running(False)
-                cap.release()
-                return
-        else:
-            # Default zone config path
-            default_zone = str(_REPO_ROOT / "edge" / "zone_intrusion" / "zones" / "camera_01_zones.json")
-            try:
-                zone_config = load_zone_config(default_zone)
-            except Exception:
-                zone_config = None
+    if state.mode in ("zone_intrusion", "all", "combined"):
+        if _ZONE_SUPPORT:
+            if state.zone_config_path:
+                try:
+                    zone_config = load_zone_config(state.zone_config_path)
+                    logger.info("[stream] Zone config loaded: %s", state.zone_config_path)
+                except Exception as exc:
+                    logger.warning("[stream] Failed to load zone config %s: %s", state.zone_config_path, exc)
+            if zone_config is None:
+                # Auto-detect existing zone config in edge/zone_intrusion/zones
+                zones_dir = _REPO_ROOT / "edge" / "zone_intrusion" / "zones"
+                found_zones = sorted(list(zones_dir.glob("*.json"))) if zones_dir.is_dir() else []
+                if found_zones:
+                    try:
+                        zone_config = load_zone_config(str(found_zones[0]))
+                        logger.info("[stream] Auto-loaded existing zone config: %s", found_zones[0].name)
+                    except Exception:
+                        zone_config = None
 
-        zone_debouncer = ZoneDebounceTracker(required_frames=debounce_frames)
+            zone_debouncer = ZoneDebounceTracker(required_frames=debounce_frames)
 
     # --- PPE debouncer ---
     ppe_debouncer = DebounceTracker(debounce_threshold=debounce_frames)
@@ -335,33 +350,61 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
     logger.info("[stream] Inference loop starting (mode=%s, debounce=%d)",
                 state.mode, debounce_frames)
 
+    webcam_fail_count = 0
     # --- Inference loop ---
     while state.is_running():
-        ret, frame = cap.read()
+        try:
+            read_result = cap.read()
+            if not isinstance(read_result, (tuple, list)) or len(read_result) < 2:
+                break
+            ret, frame = read_result[0], read_result[1]
+        except Exception:
+            break
         if not ret:
+            if isinstance(source, int):
+                webcam_fail_count += 1
+                if webcam_fail_count < 30:
+                    time.sleep(0.05)
+                    continue
+                logger.warning("[stream] Webcam disconnected or unavailable — stopping.")
+                break
             # End of file — loop the video (useful for demo with a video file)
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = cap.read()
             if not ret:
                 logger.warning("[stream] Source exhausted and cannot rewind — stopping.")
                 break
+        webcam_fail_count = 0
 
         h, w = frame.shape[:2]
 
-        if state.mode == "ppe":
-            # --- PPE detection mode ---
-            try:
-                results = model.track(
-                    source=frame,
-                    conf=conf_threshold,
-                    tracker="bytetrack.yaml",
-                    persist=True,
-                    verbose=False,
-                )
-            except Exception as exc:
-                logger.warning("[stream] Model track failed: %s", exc)
-                results = []
+        # Determine person class ID
+        person_cls_id = None
+        if hasattr(model, "names") and isinstance(model.names, dict):
+            for cid, cname in model.names.items():
+                if str(cname).lower() == "person":
+                    person_cls_id = cid
+                    break
+        if person_cls_id is None:
+            person_cls_id = 12 if (hasattr(model, "names") and 12 in model.names) else 0
 
+        classes_arg = [person_cls_id] if state.mode == "zone_intrusion" else None
+
+        try:
+            results = model.track(
+                source=frame,
+                conf=conf_threshold,
+                tracker="bytetrack.yaml",
+                persist=True,
+                classes=classes_arg,
+                verbose=False,
+            )
+        except Exception as exc:
+            logger.warning("[stream] Model track failed: %s", exc)
+            results = []
+
+        # 1. PPE processing (in 'ppe' mode or 'all'/'combined' mode)
+        if state.mode in ("ppe", "all", "combined"):
             frame_detections = []
             for r in results:
                 raw = _draw_ppe_annotations(frame, r.boxes, model.names)
@@ -385,37 +428,21 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
                 if events_api_url:
                     post_event(event, events_api_url)
 
-        elif state.mode == "zone_intrusion" and _ZONE_SUPPORT:
-            # --- Zone intrusion mode ---
-            try:
-                results = model.track(
-                    source=frame,
-                    conf=conf_threshold,
-                    tracker="bytetrack.yaml",
-                    persist=True,
-                    classes=[0],  # person only
-                    verbose=False,
-                )
-            except Exception as exc:
-                logger.warning("[stream] Model track failed: %s", exc)
-                results = []
-
+        # 2. Zone intrusion processing (in 'zone_intrusion' mode or 'all'/'combined' mode)
+        if state.mode in ("zone_intrusion", "all", "combined") and _ZONE_SUPPORT and zone_config:
             for r in results:
-                if zone_config:
-                    zone_dets = _draw_zone_annotations(
-                        frame, zone_config, r.boxes, frame_counts
-                    )
-                else:
-                    zone_dets = []
-
+                zone_dets = _draw_zone_annotations(
+                    frame, zone_config, r.boxes, frame_counts, person_cls_id=person_cls_id
+                )
                 for det in zone_dets:
                     tid = det["track_id"]
                     conf = det["confidence"]
+                    in_zone = det.get("in_zone", False)
                     if zone_debouncer:
                         fired = zone_debouncer.update(
-                            track_id=tid, cls="person", is_in_zone=True
+                            track_id=tid, cls="person", is_in_zone=in_zone
                         )
-                        if fired:
+                        if fired and in_zone:
                             ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                             zid = zone_config["zone_id"] if zone_config else state.zone_id
                             cam = zone_config.get("camera_id", state.camera_id) if zone_config else state.camera_id
@@ -437,16 +464,27 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
                 # Reset zone debouncer for persons NOT in zone this frame
                 if r.boxes is not None and r.boxes.id is not None and zone_debouncer:
                     in_zone_ids = {det["track_id"] for det in zone_dets}
-                    for tid_all in r.boxes.id.int().tolist():
-                        if tid_all not in in_zone_ids:
-                            zone_debouncer.update(
-                                track_id=tid_all, cls="person", is_in_zone=False
-                            )
+                    for box in r.boxes:
+                        if box.id is not None:
+                            b_cls = int(box.cls[0].item())
+                            if person_cls_id is not None and b_cls != person_cls_id:
+                                continue
+                            tid_all = int(box.id[0].item())
+                            if tid_all not in in_zone_ids:
+                                zone_debouncer.update(
+                                    track_id=tid_all, cls="person", is_in_zone=False
+                                )
 
         # --- Add stream overlay (mode label + source) ---
-        mode_label = "PPE DETECTION" if state.mode == "ppe" else "ZONE INTRUSION"
+        if state.mode in ("all", "combined"):
+            mode_label = "ALL-IN-ONE (PPE + ZONE)"
+        elif state.mode == "ppe":
+            mode_label = "PPE DETECTION"
+        else:
+            mode_label = "ZONE INTRUSION"
+
         cv2.putText(frame, f"AEGIS LIVE — {mode_label}", (8, 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (56, 189, 248), 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.52, (56, 189, 248), 1, cv2.LINE_AA)
         cv2.putText(frame, f"src: {str(source_raw)[:40]}", (8, h - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (100, 100, 100), 1, cv2.LINE_AA)
 
@@ -461,9 +499,12 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
     logger.info("[stream] Worker thread exited cleanly.")
 
 
-# ---------------------------------------------------------------------------
-# Public API — called by FastAPI endpoints in main.py
-# ---------------------------------------------------------------------------
+# Concurrency & Client Management Locks
+_stream_control_lock = threading.Lock()
+_client_count_lock = threading.Lock()
+_active_mjpeg_clients = 0
+MAX_MJPEG_CLIENTS = 10
+
 
 def start_stream(
     source: str,
@@ -477,49 +518,56 @@ def start_stream(
     conf_threshold: float = 0.25,
 ) -> Dict[str, Any]:
     """
-    Start a background inference stream.
-
-    Returns a dict with keys: started (bool), error (str|None), source (str).
-    If a stream is already running it is stopped first.
+    Start a background inference stream safely with re-entrancy protection.
+    If a stream is already running, it is cleanly stopped and joined first.
     """
-    state = _stream_state
+    with _stream_control_lock:
+        state = _stream_state
 
-    # Stop any running stream
-    if state.is_running():
-        stop_stream()
-        time.sleep(0.3)  # give thread a moment to exit
+        # Stop and join any running worker thread
+        if state.is_running():
+            stop_stream()
+            if state._thread and state._thread.is_alive():
+                state._thread.join(timeout=2.0)
 
-    if mode not in ("ppe", "zone_intrusion"):
-        return {"started": False, "error": f"Unknown mode '{mode}'. Use 'ppe' or 'zone_intrusion'.", "source": source}
+        if mode not in ("ppe", "zone_intrusion", "all", "combined"):
+            return {
+                "started": False,
+                "error": f"Unknown mode '{mode}'. Use 'all', 'ppe', or 'zone_intrusion'.",
+                "source": source,
+            }
 
-    # Default model path
-    if model_path is None:
-        model_path = str(_REPO_ROOT / "edge" / "ppe_detection" / "models" / "ppe_final_v4.pt")
+        # Default model path
+        if model_path is None:
+            if mode == "zone_intrusion" and (_REPO_ROOT / "yolo11n.pt").is_file():
+                model_path = str(_REPO_ROOT / "yolo11n.pt")
+            else:
+                model_path = str(_REPO_ROOT / "edge" / "ppe_detection" / "models" / "ppe_final_v4.pt")
 
-    state.clear()
-    state.source = source
-    state.mode = mode
-    state.zone_config_path = zone_config_path
-    state.camera_id = camera_id
-    state.zone_id = zone_id
-    state.api_url = events_api_url
-    state.set_running(True)
+        state.clear()
+        state.source = source
+        state.mode = mode
+        state.zone_config_path = zone_config_path
+        state.camera_id = camera_id
+        state.zone_id = zone_id
+        state.api_url = events_api_url
+        state.set_running(True)
 
-    thread = threading.Thread(
-        target=_stream_worker,
-        args=(state, model_path, events_api_url, debounce_frames, conf_threshold),
-        daemon=True,
-        name="aegis-stream-worker",
-    )
-    thread.start()
-    state._thread = thread
+        thread = threading.Thread(
+            target=_stream_worker,
+            args=(state, model_path, events_api_url, debounce_frames, conf_threshold),
+            daemon=True,
+            name="aegis-stream-worker",
+        )
+        thread.start()
+        state._thread = thread
 
-    logger.info("[stream] Started: source=%s mode=%s", source, mode)
-    return {"started": True, "error": None, "source": source, "mode": mode}
+        logger.info("[stream] Started: source=%s mode=%s", source, mode)
+        return {"started": True, "error": None, "source": source, "mode": mode}
 
 
 def stop_stream() -> Dict[str, Any]:
-    """Signal the background stream worker to stop. Returns immediately."""
+    """Signal the background stream worker to stop and wait briefly for release."""
     state = _stream_state
     if not state.is_running():
         return {"stopped": True, "was_running": False}
@@ -531,6 +579,8 @@ def stop_stream() -> Dict[str, Any]:
 def stream_status() -> Dict[str, Any]:
     """Return current stream state for the /stream/status endpoint."""
     state = _stream_state
+    with _client_count_lock:
+        client_count = _active_mjpeg_clients
     return {
         "running": state.is_running(),
         "source": state.source,
@@ -539,37 +589,46 @@ def stream_status() -> Dict[str, Any]:
         "zone_id": state.zone_id,
         "error": state.get_error(),
         "has_frame": state.get_latest_frame() is not None,
+        "active_viewers": client_count,
     }
 
 
 def generate_mjpeg_frames() -> Generator[bytes, None, None]:
     """
-    Yield MJPEG boundary-encoded frame chunks for a multipart/x-mixed-replace
-    streaming response.
-
-    Usage in FastAPI:
-        return StreamingResponse(generate_mjpeg_frames(),
-                                 media_type="multipart/x-mixed-replace; boundary=aegisframe")
+    Yield MJPEG boundary-encoded frame chunks for multipart/x-mixed-replace.
+    Protects server against client explosion by enforcing a MAX_MJPEG_CLIENTS limit.
     """
+    global _active_mjpeg_clients
+    with _client_count_lock:
+        if _active_mjpeg_clients >= MAX_MJPEG_CLIENTS:
+            err_frame = _make_placeholder_frame(f"Max viewers ({MAX_MJPEG_CLIENTS}) reached")
+            yield b"--aegisframe\r\nContent-Type: image/jpeg\r\n\r\n" + err_frame + b"\r\n"
+            return
+        _active_mjpeg_clients += 1
+
     state = _stream_state
     boundary = b"--aegisframe\r\n"
     content_type = b"Content-Type: image/jpeg\r\n\r\n"
     tail = b"\r\n"
 
-    # Serve a placeholder grey frame if no stream is running yet
     placeholder = _make_placeholder_frame("No active stream")
 
-    while True:
-        if state.is_running():
-            frame_bytes = state.wait_for_frame(timeout=2.0)
-        else:
-            frame_bytes = None
-            time.sleep(0.05)
+    try:
+        while True:
+            if state.is_running():
+                frame_bytes = state.wait_for_frame(timeout=2.0)
+            else:
+                frame_bytes = None
+                time.sleep(0.4)  # Conservative polling when inactive
 
-        if frame_bytes is None:
-            frame_bytes = placeholder
+            if frame_bytes is None:
+                frame_bytes = placeholder
 
-        yield boundary + content_type + frame_bytes + tail
+            yield boundary + content_type + frame_bytes + tail
+    finally:
+        with _client_count_lock:
+            _active_mjpeg_clients = max(0, _active_mjpeg_clients - 1)
+
 
 
 def get_latest_frame_jpeg() -> Optional[bytes]:
