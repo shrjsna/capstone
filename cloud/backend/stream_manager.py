@@ -159,10 +159,15 @@ class StreamState:
 
 # Module-level singleton — one stream at a time
 _stream_state = StreamState()
+_capture_lock = threading.Lock()
 
 
 def get_stream_state() -> StreamState:
     return _stream_state
+
+
+def get_capture_lock() -> threading.Lock:
+    return _capture_lock
 
 
 # ---------------------------------------------------------------------------
@@ -173,13 +178,11 @@ def _draw_ppe_annotations(frame, boxes, model_names: Dict[int, str]) -> List[Dic
     """Draw PPE violation boxes on frame, return list of detection dicts."""
     cv2 = _get_cv2()
     detections = []
-    if boxes is None or boxes.id is None:
+    if boxes is None or len(boxes) == 0:
         return detections
 
-    for box in boxes:
-        track_id = int(box.id[0].item()) if box.id is not None else None
-        if track_id is None:
-            continue
+    for i, box in enumerate(boxes):
+        track_id = int(box.id[0].item()) if (box.id is not None and len(box.id) > 0) else (i + 1)
         cls_id = int(box.cls[0].item())
         confidence = float(box.conf[0].item())
         class_name = model_names.get(cls_id, f"class_{cls_id}")
@@ -212,37 +215,49 @@ def _draw_zone_annotations(frame, zone_config: Dict, boxes,
     cv2 = _get_cv2()
     detections = []
 
-    # Draw zone polygon (cyan: BGR 0,230,255)
-    polygon = zone_config.get("polygon", [])
-    if polygon:
-        pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
-        cv2.polylines(frame, [pts], isClosed=True, color=(0, 230, 255), thickness=2)
-        # Semi-transparent fill
-        overlay = frame.copy()
-        cv2.fillPoly(overlay, [pts], color=(0, 230, 255))
-        cv2.addWeighted(overlay, 0.08, frame, 0.92, 0, frame)
-        # Label
-        if polygon:
-            lx, ly = polygon[0]
-            cv2.putText(frame, zone_config.get("zone_id", "zone"),
-                        (lx, max(ly - 6, 14)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 230, 255), 1, cv2.LINE_AA)
-
-    if boxes is None or boxes.id is None:
+    h, w = frame.shape[:2]
+    orig_polygon = zone_config.get("polygon", [])
+    if not orig_polygon:
         return detections
 
-    for box in boxes:
-        if box.id is None:
-            continue
+    cfg_w = zone_config.get("frame_width")
+    cfg_h = zone_config.get("frame_height")
+    if cfg_w and cfg_h and (cfg_w != w or cfg_h != h):
+        scale_x = w / float(cfg_w)
+        scale_y = h / float(cfg_h)
+        polygon = [[int(pt[0] * scale_x), int(pt[1] * scale_y)] for pt in orig_polygon]
+    else:
+        polygon = orig_polygon
+
+    active_cfg = dict(zone_config)
+    active_cfg["polygon"] = polygon
+
+    # Draw zone polygon (cyan: BGR 0,230,255)
+    pts = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
+    cv2.polylines(frame, [pts], isClosed=True, color=(0, 230, 255), thickness=2)
+    # Semi-transparent fill
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [pts], color=(0, 230, 255))
+    cv2.addWeighted(overlay, 0.08, frame, 0.92, 0, frame)
+    # Label
+    lx, ly = polygon[0]
+    cv2.putText(frame, zone_config.get("zone_id", "zone"),
+                (lx, max(ly - 6, 14)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 230, 255), 1, cv2.LINE_AA)
+
+    if boxes is None or len(boxes) == 0:
+        return detections
+
+    for i, box in enumerate(boxes):
         cls_id = int(box.cls[0].item())
         if person_cls_id is not None and cls_id != person_cls_id:
             continue
 
-        tid = int(box.id[0].item())
+        tid = int(box.id[0].item()) if (box.id is not None and len(box.id) > 0) else (i + 1)
         conf = float(box.conf[0].item())
         xyxy = box.xyxy[0].tolist()
         x1, y1, x2, y2 = [int(v) for v in xyxy]
-        in_zone = check_box_in_zone(xyxy, zone_config) if _ZONE_SUPPORT else False
+        in_zone = check_box_in_zone(xyxy, active_cfg) if _ZONE_SUPPORT else False
 
         key = (tid, "person")
         if in_zone:
@@ -257,12 +272,11 @@ def _draw_zone_annotations(frame, zone_config: Dict, boxes,
         cv2.putText(frame, f"id:{tid} {in_label}", (x1, max(y1 - 6, 14)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
 
-        if in_zone:
-            detections.append({
-                "track_id": tid,
-                "confidence": conf,
-                "in_zone": True,
-            })
+        detections.append({
+            "track_id": tid,
+            "confidence": conf,
+            "in_zone": in_zone,
+        })
 
     return detections
 
@@ -283,7 +297,8 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
     logger.info("[stream] Opening source: %s", source)
 
     # --- Open capture ---
-    cap = cv2.VideoCapture(source)
+    with _capture_lock:
+        cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         msg = f"Could not open source: {source_raw!r}. Check the URL/path/index."
         logger.error("[stream] %s", msg)
@@ -348,7 +363,7 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
         if not ret:
             if isinstance(source, int):
                 webcam_fail_count += 1
-                if webcam_fail_count < 15:
+                if webcam_fail_count < 30:
                     time.sleep(0.05)
                     continue
                 logger.warning("[stream] Webcam disconnected or unavailable — stopping.")
@@ -422,11 +437,12 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
                 for det in zone_dets:
                     tid = det["track_id"]
                     conf = det["confidence"]
+                    in_zone = det.get("in_zone", False)
                     if zone_debouncer:
                         fired = zone_debouncer.update(
-                            track_id=tid, cls="person", is_in_zone=True
+                            track_id=tid, cls="person", is_in_zone=in_zone
                         )
-                        if fired:
+                        if fired and in_zone:
                             ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                             zid = zone_config["zone_id"] if zone_config else state.zone_id
                             cam = zone_config.get("camera_id", state.camera_id) if zone_config else state.camera_id
@@ -488,11 +504,6 @@ _stream_control_lock = threading.Lock()
 _client_count_lock = threading.Lock()
 _active_mjpeg_clients = 0
 MAX_MJPEG_CLIENTS = 10
-_capture_lock = threading.Lock()
-
-
-def get_capture_lock() -> threading.Lock:
-    return _capture_lock
 
 
 def start_stream(
@@ -528,7 +539,10 @@ def start_stream(
 
         # Default model path
         if model_path is None:
-            model_path = str(_REPO_ROOT / "edge" / "ppe_detection" / "models" / "ppe_final_v4.pt")
+            if mode == "zone_intrusion" and (_REPO_ROOT / "yolo11n.pt").is_file():
+                model_path = str(_REPO_ROOT / "yolo11n.pt")
+            else:
+                model_path = str(_REPO_ROOT / "edge" / "ppe_detection" / "models" / "ppe_final_v4.pt")
 
         state.clear()
         state.source = source

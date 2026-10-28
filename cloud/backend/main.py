@@ -50,6 +50,7 @@ from cloud.backend.stream_manager import (
     generate_mjpeg_frames,
     get_latest_frame_jpeg,
     get_capture_lock,
+    get_stream_state,
 )
 from cloud.backend.process_manager import (
     get_process_manager,
@@ -455,6 +456,25 @@ def capture_frame(source: str = Query(..., description="Video source: webcam ind
         raise HTTPException(status_code=503, detail="cv2 not available on this server.")
 
     src = int(safe_src_str) if safe_src_str.isdigit() else safe_src_str
+
+    state = get_stream_state()
+    if state.is_running():
+        jpeg = state.get_latest_frame()
+        if jpeg is None:
+            jpeg = state.wait_for_frame(timeout=1.0)
+        if jpeg:
+            import numpy as np
+            nparr = np.frombuffer(jpeg, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            h, w = (img.shape[0], img.shape[1]) if img is not None else (480, 640)
+            return StreamingResponse(
+                iter([jpeg]),
+                media_type="image/jpeg",
+                headers={
+                    "X-Frame-Width": str(w),
+                    "X-Frame-Height": str(h),
+                },
+            )
 
     capture_lock = get_capture_lock()
     with capture_lock:

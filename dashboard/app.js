@@ -202,32 +202,47 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
-  // Tab switching
+  // Live Preview Control & Tab switching
   // =========================================================================
+  function stopLivePreview() {
+    if (livePreviewTimer) {
+      clearInterval(livePreviewTimer);
+      livePreviewTimer = null;
+    }
+    isLivePreview = false;
+    if (btnLivePreview) {
+      btnLivePreview.classList.remove('active');
+      btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Live Preview`;
+    }
+    if (zoneStatusBadge && zoneCanvas && !zoneCanvas._imgElement) {
+      zoneStatusBadge.className = 'proc-badge badge-stopped';
+      zoneStatusBadge.textContent = 'READY';
+    }
+  }
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach(c => {
+      c.classList.toggle('active', c.id === `tab-${tab}`);
+    });
+    if (tab !== 'zones') {
+      stopLivePreview();
+    }
+    if (tab === 'zones') loadZonesList();
+    if (tab === 'stream') loadZonesForStream();
+    if (tab === 'control') {
+      loadProcessStatus();
+      startProcessPolling();
+    } else {
+      stopProcessPolling();
+    }
+  }
+
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const tab = btn.getAttribute('data-tab');
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(`tab-${tab}`)?.classList.add('active');
-      if (tab === 'zones') loadZonesList();
-      if (tab !== 'zones' && isLivePreview) {
-        isLivePreview = false;
-        if (livePreviewTimer) clearInterval(livePreviewTimer);
-        livePreviewTimer = null;
-        if (btnLivePreview) {
-          btnLivePreview.classList.remove('active');
-          btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Live Preview`;
-        }
-      }
-      if (tab === 'stream') loadZonesForStream();
-      if (tab === 'control') {
-        loadProcessStatus();
-        startProcessPolling();
-      } else {
-        stopProcessPolling();
-      }
+      switchTab(btn.getAttribute('data-tab'));
     });
   });
 
@@ -285,6 +300,12 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       if (!Array.isArray(data)) throw new Error('Expected array');
+      // Show immediate notification when new alerts arrive
+      if (activeAlerts && activeAlerts.length > 0 && data.length > activeAlerts.length) {
+        const newest = data[0];
+        const label = (newest.class || newest.class_name || 'Safety violation').replace(/_/g, ' ').toUpperCase();
+        showToast(`🚨 ${label} detected on ${newest.camera_id}!`, 'error');
+      }
       activeAlerts = data;
       setStatus(true);
       syncCameraFilterOptions();
@@ -589,6 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Start / stop stream
   // =========================================================================
   btnStreamStart.addEventListener('click', async () => {
+    stopLivePreview();
     const source = sourceInput.value.trim();
     if (!source) { showToast('Enter a source first.', 'error'); return; }
 
@@ -622,7 +644,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       // Stream started — point <img> at the MJPEG endpoint
       isStreaming = true;
-      const mjpegUrl = `${getApiBase()}/stream/mjpeg`;
+      const mjpegUrl = `${getApiBase()}/stream/mjpeg?t=${Date.now()}`;
       streamImg.src = mjpegUrl;
       streamImg.style.display = 'block';
       streamPlaceholder.style.display = 'none';
@@ -686,9 +708,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateStreamRecentEvents() {
     if (!streamRecentEvents || !isStreaming) return;
-    const recent = activeAlerts
-      .filter(a => a.camera_id === streamCameraId)
-      .slice(0, 4);
+    let recent = activeAlerts.filter(a => !streamCameraId || a.camera_id === streamCameraId).slice(0, 5);
+    if (recent.length === 0) {
+      recent = activeAlerts.slice(0, 5);
+    }
     streamRecentEvents.innerHTML = '';
     if (recent.length === 0) return;
     recent.forEach(a => {
@@ -821,6 +844,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Still Frame Capture
   btnCapture.addEventListener('click', async () => {
+    stopLivePreview();
     const src = captureSource.value.trim();
     if (!src) { showToast('Enter a camera source.', 'error'); return; }
 
@@ -859,15 +883,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const src = captureSource.value.trim() || '0';
       if (isLivePreview) {
         // Stop preview
-        isLivePreview = false;
-        if (livePreviewTimer) clearInterval(livePreviewTimer);
-        livePreviewTimer = null;
-        btnLivePreview.classList.remove('active');
-        btnLivePreview.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>Live Preview`;
-        if (zoneStatusBadge) {
-          zoneStatusBadge.className = 'proc-badge badge-stopped';
-          zoneStatusBadge.textContent = 'READY';
-        }
+        stopLivePreview();
         showToast('Live preview paused — frame ready for marking', 'info');
       } else {
         // Start preview
@@ -1148,6 +1164,9 @@ document.addEventListener('DOMContentLoaded', () => {
       btnStartZoneDetect.disabled = true;
       btnStartZoneDetect.textContent = 'Configuring Intrusion Detection…';
 
+      // Stop any lingering camera polling
+      stopLivePreview();
+
       // 1. Save zone
       const saved = await saveCurrentZone();
       if (!saved) {
@@ -1159,12 +1178,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(`Zone saved! Launching intrusion detection on ${saved.zone_id}...`, 'info');
 
       // 2. Switch to Live Stream tab
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      const streamTabBtn = document.querySelector('.tab-btn[data-tab="stream"]');
-      if (streamTabBtn) streamTabBtn.classList.add('active');
-      const tabStreamEl = document.getElementById('tab-stream');
-      if (tabStreamEl) tabStreamEl.classList.add('active');
+      switchTab('stream');
 
       // 3. Switch mode to Zone Intrusion
       activeMode = 'zone_intrusion';
@@ -1257,17 +1271,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Run detection directly
         el.querySelector('.btn-zone-action-detect').addEventListener('click', async e => {
+          stopLivePreview();
           const file = e.currentTarget.getAttribute('data-file');
           const cam = e.currentTarget.getAttribute('data-cam');
           const zone = e.currentTarget.getAttribute('data-zone');
 
           // Switch to Live Stream
-          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-          document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-          const streamTabBtn = document.querySelector('.tab-btn[data-tab="stream"]');
-          if (streamTabBtn) streamTabBtn.classList.add('active');
-          const tabStreamEl = document.getElementById('tab-stream');
-          if (tabStreamEl) tabStreamEl.classList.add('active');
+          switchTab('stream');
 
           activeMode = 'zone_intrusion';
           if (modeSeg) {
