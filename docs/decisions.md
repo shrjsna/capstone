@@ -117,3 +117,13 @@ Decided: apply all findings from internal code audit before further development.
    failing loudly if features are added/removed without updating the constant.
 7. **min_validation_score standardised to 0.70**: `train_baseline.py` was using 0.60;
    aligned to match `retrain()` default so the whole project uses one consistent threshold.
+
+## 2026-10-28 — Federation: FedAvg over LinUCB weight matrices
+Decided: use Flower FedAvg to aggregate bandit weight matrices (A, b) across sites.
+Why: FedAvg of linear weight matrices is mathematically equivalent to pooling all
+sites' data — A_global = weighted_mean(A_i), b_global = weighted_mean(b_i) — without
+any raw event data or video ever leaving a deployment site. Validation gate is disabled
+during FL rounds (min_validation_score=0.0) because the server-side FedAvg acts as the
+global quality filter. Each client still runs its own local retrain before sending
+updated weights to the server.
+
