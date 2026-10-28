@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafetyOps Dashboard — Industrial Safety Monitoring</title>
+  <meta name="description" content="Real-time operator dashboard for Industrial Safety Monitoring System. Review PPE violations and zone intrusions, confirm or dismiss alerts, and track model performance." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ───────────────────── HEADER ───────────────────── -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon">🛡️</span>
+        <span class="logo-text">SafetyOps</span>
+        <span class="logo-sub">Dashboard</span>
+      </div>
+    </div>
+
+    <div class="header-center">
+      <div class="live-badge">
+        <span class="live-dot"></span>
+        LIVE
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="policy-badge" id="policy-badge">
+        <span class="policy-label">Policy</span>
+        <span class="policy-version" id="policy-version">loading…</span>
+      </div>
+      <div class="strategy-badge" id="strategy-badge">linucb</div>
+      <button class="btn btn-ghost btn-sm" id="retrain-btn" title="Trigger batch retrain">⟳ Retrain</button>
+      <button class="btn btn-danger-ghost btn-sm" id="rollback-btn" title="Roll back to previous policy">↩ Rollback</button>
+    </div>
+  </header>
+
+  <!-- ───────────────────── STATS BAR ───────────────────── -->
+  <section class="stats-bar">
+    <div class="stat-card" id="stat-pending">
+      <div class="stat-icon">🔔</div>
+      <div class="stat-body">
+        <div class="stat-value" id="pending-count">0</div>
+        <div class="stat-label">Pending Alerts</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">✅</div>
+      <div class="stat-body">
+        <div class="stat-value" id="confirmed-count">0</div>
+        <div class="stat-label">Confirmed Today</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">⚠️</div>
+      <div class="stat-body">
+        <div class="stat-value" id="false-alarm-count">0</div>
+        <div class="stat-label">False Alarms Today</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🎯</div>
+      <div class="stat-body">
+        <div class="stat-value" id="accuracy-pct">—</div>
+        <div class="stat-label">Precision</div>
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">🧠</div>
+      <div class="stat-body">
+        <div class="stat-value" id="feedback-count">0</div>
+        <div class="stat-label">Feedback Collected</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────── FILTER BAR ───────────────────── -->
+  <section class="filter-bar">
+    <div class="filter-tabs">
+      <button class="filter-tab active" id="tab-all" onclick="setFilter('all')">All</button>
+      <button class="filter-tab" id="tab-pending" onclick="setFilter('pending')">Pending</button>
+      <button class="filter-tab" id="tab-acknowledged" onclick="setFilter('acknowledged')">Acknowledged</button>
+    </div>
+    <div class="filter-right">
+      <label class="filter-label">Event type:</label>
+      <select id="type-filter" class="select-sm" onchange="applyFilters()">
+        <option value="all">All Types</option>
+        <option value="ppe_violation">PPE Violation</option>
+        <option value="zone_intrusion">Zone Intrusion</option>
+      </select>
+      <label class="filter-label">Action:</label>
+      <select id="action-filter" class="select-sm" onchange="applyFilters()">
+        <option value="all">All Actions</option>
+        <option value="escalate">Escalate</option>
+        <option value="log_only">Log Only</option>
+        <option value="adjust_threshold">Adjust Threshold</option>
+      </select>
+      <div class="refresh-info">
+        Auto-refresh <span id="refresh-countdown">5</span>s
+        <button class="btn btn-ghost btn-xs" onclick="fetchAlerts()" title="Refresh now">↻</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────── ALERT FEED ───────────────────── -->
+  <main class="main-content">
+    <div class="alerts-table-wrapper">
+      <table class="alerts-table" id="alerts-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Camera / Zone</th>
+            <th>Violation</th>
+            <th>Confidence</th>
+            <th>AI Decision</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="alerts-tbody">
+          <tr class="empty-row">
+            <td colspan="7">
+              <div class="empty-state">
+                <div class="empty-icon">📡</div>
+                <div class="empty-text">Waiting for detection events…</div>
+                <div class="empty-sub">Make sure the backend is running and edge cameras are connected.</div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- ───────────────────── RETRAIN MODAL ───────────────────── -->
+  <div class="modal-overlay" id="retrain-modal" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>⟳ Trigger Batch Retrain</h2>
+        <button class="modal-close" onclick="closeModal('retrain-modal')">✕</button>
+      </div>
+      <div class="modal-body">
+        <p>This will train a candidate policy on all <strong id="feedback-count-modal">0</strong> collected feedback records and deploy it if it passes the validation gate.</p>
+        <label class="field-label">Min. Validation Score (gate threshold)</label>
+        <input type="range" id="gate-slider" min="0" max="1" step="0.05" value="0.70" oninput="document.getElementById('gate-val').textContent = this.value" />
+        <span class="gate-val" id="gate-val">0.70</span>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('retrain-modal')">Cancel</button>
+        <button class="btn btn-primary" onclick="doRetrain()">Run Retrain</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────────────── TOAST ───────────────────── -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

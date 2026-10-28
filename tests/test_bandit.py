@@ -7,7 +7,7 @@ Uses standard library unittest so it runs out-of-the-box in any Python environme
 
 import unittest
 import numpy as np
-from cloud.decision_layer.bandit import ContextualBandit, ACTIONS, DEFAULT_THRESHOLD
+from cloud.decision_layer.bandit import ContextualBandit, ACTIONS, DEFAULT_THRESHOLD, MAX_PENDING_EVENTS
 
 
 class TestBanditDecisionLayer(unittest.TestCase):
@@ -142,8 +142,10 @@ class TestBanditDecisionLayer(unittest.TestCase):
 
         self.assertFalse(record["deployed"])
         self.assertLess(record["validation_score"], 0.99)
-        # Current active policy version must remain policy_v5
+        # Active policy version must remain unchanged
         self.assertEqual(bandit.policy_version, "policy_v5")
+        # Record must report the LIVE active version, not the rejected candidate
+        self.assertEqual(record["policy_version"], "policy_v5")
 
     # -----------------------------------------------------------------------------
     # Edge Case Tests (Required by Spec)
@@ -198,6 +200,63 @@ class TestBanditDecisionLayer(unittest.TestCase):
             self.assertIsInstance(decision, dict)
             self.assertIn(decision["action"], ACTIONS)
             self.assertEqual(decision["threshold_used"], DEFAULT_THRESHOLD)
+
+    # -----------------------------------------------------------------------------
+    # Regression Tests for Audit Fixes
+    # -----------------------------------------------------------------------------
+
+    def test_duplicate_event_id_raises_value_error(self):
+        """Verify predict() raises ValueError when the same event_id is submitted before update()."""
+        bandit = ContextualBandit()
+        ev = {"confidence": 0.8, "event_type": "ppe_violation", "class": "no_helmet"}
+        bandit.predict(ev, event_id="dup_test_evt_001")
+
+        with self.assertRaises(ValueError):
+            bandit.predict(ev, event_id="dup_test_evt_001")  # Must raise — no update() was called
+
+        # After calling update(), the same event_id must be usable again on a fresh predict
+        bandit.update("dup_test_evt_001", "confirmed")
+        decision = bandit.predict(ev, event_id="dup_test_evt_001")
+        self.assertIn(decision["action"], ACTIONS)
+
+    def test_pending_events_cap_evicts_oldest(self):
+        """Verify MAX_PENDING_EVENTS cap is enforced and oldest entry is evicted on overflow."""
+        bandit = ContextualBandit()
+        ev = {"confidence": 0.8, "event_type": "ppe_violation", "class": "no_helmet"}
+        first_id = "cap_test_0000000"
+
+        # Insert first event then fill remaining capacity
+        bandit.predict(ev, event_id=first_id)
+        for i in range(1, MAX_PENDING_EVENTS):
+            bandit.predict(ev, event_id=f"cap_test_{i:07d}")
+
+        self.assertEqual(len(bandit.pending_events), MAX_PENDING_EVENTS)
+        self.assertIn(first_id, bandit.pending_events)
+
+        # Adding one more must evict the oldest entry (first_id)
+        bandit.predict(ev, event_id="cap_test_overflow")
+
+        self.assertEqual(len(bandit.pending_events), MAX_PENDING_EVENTS)
+        self.assertNotIn(first_id, bandit.pending_events)
+        self.assertIn("cap_test_overflow", bandit.pending_events)
+
+    def test_gate_fail_record_reports_active_policy_version(self):
+        """Verify gate-fail retrain() record always reports the live active version, not the rejected candidate."""
+        bandit = ContextualBandit(strategy="linucb", policy_version="policy_v9")
+
+        # Alternating confirmed/false_alarm forces a mixed-signal candidate with low consensus
+        synthetic_batch = []
+        for i in range(8):
+            ev = {"event_type": "ppe_violation", "class": "no_helmet", "confidence": 0.50}
+            fb = "false_alarm" if i % 2 == 0 else "confirmed"
+            synthetic_batch.append((ev, "escalate", fb))
+
+        record = bandit.retrain(synthetic_batch, min_validation_score=0.99)
+
+        if not record["deployed"]:
+            # Gate rejected the candidate — record must reflect the still-active version
+            self.assertEqual(record["policy_version"], "policy_v9")
+            self.assertEqual(record["policy_version"], bandit.policy_version)
 
 
 if __name__ == "__main__":

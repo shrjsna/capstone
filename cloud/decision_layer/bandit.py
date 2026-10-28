@@ -13,6 +13,8 @@ feedback, fast to update incrementally, and easy to inspect/explain during a pro
 
 import math
 import datetime
+import threading
+import uuid
 from typing import Dict, List, Tuple, Union, Optional
 import numpy as np
 
@@ -21,6 +23,7 @@ import numpy as np
 ACTIONS = ["escalate", "log_only", "adjust_threshold"]
 DEFAULT_THRESHOLD = 0.75
 FEATURE_DIM = 16
+MAX_PENDING_EVENTS = 10_000  # Cap on unacknowledged pending events to prevent unbounded memory growth
 
 
 class ContextualBandit:
@@ -79,6 +82,9 @@ class ContextualBandit:
 
         # In-memory storage mapping event_id -> {"context": x, "action": action, "timestamp": ts}
         self.pending_events: Dict[str, Dict] = {}
+
+        # Threading lock — protects A, b, pending_events, and thresholds from concurrent mutation
+        self._lock = threading.Lock()
 
     def get_threshold(self, camera_id: str, zone_id: str) -> float:
         """Retrieve current dynamic detection threshold for a given camera and zone."""
@@ -182,6 +188,11 @@ class ContextualBandit:
             dtype=np.float64,
         ).reshape(self.d, 1)
 
+        assert x.shape == (self.d, 1), (
+            f"Feature vector shape mismatch: expected ({self.d}, 1), got {x.shape}. "
+            f"Update the FEATURE_DIM constant if features were added or removed."
+        )
+
         return x
 
     def select_action(self, x: np.ndarray) -> str:
@@ -233,7 +244,8 @@ class ContextualBandit:
         if not event_id:
             event_id = str(event.get("event_id", ""))
         if not event_id:
-            event_id = f"evt_{abs(hash(str(event))) % 1000000:06d}"
+            # Use uuid4 for a 2^48 ID space — avoids hash collisions on high-volume camera feeds
+            event_id = f"evt_{uuid.uuid4().hex[:12]}"
 
         camera_id = str(event.get("camera_id", "default_cam"))
         zone_id = str(event.get("zone_id", "default_zone"))
@@ -260,6 +272,18 @@ class ContextualBandit:
             self.thresholds[key] = threshold_used
         else:
             threshold_used = round(current_threshold, 4)
+
+        # Guard against duplicate event_ids — signals a caller bug (same event sent twice)
+        if event_id in self.pending_events:
+            raise ValueError(
+                f"event_id '{event_id}' already has a pending decision awaiting operator feedback. "
+                "Call update() with this event_id before issuing another predict() for the same event."
+            )
+
+        # Evict the oldest unacknowledged entry when cap is reached (prevents unbounded memory growth)
+        if len(self.pending_events) >= MAX_PENDING_EVENTS:
+            oldest_key = next(iter(self.pending_events))
+            del self.pending_events[oldest_key]
 
         # Save context & action for later reward lookup in update()
         self.pending_events[event_id] = {
@@ -312,27 +336,28 @@ class ContextualBandit:
         Returns:
             bool: True if event_id was found and model updated, False if event_id is unrecognized.
         """
-        if event_id not in self.pending_events:
-            return False
+        with self._lock:
+            if event_id not in self.pending_events:
+                return False
 
-        if isinstance(feedback, dict):
-            feedback_str = str(feedback.get("feedback", "false_alarm"))
-        else:
-            feedback_str = str(feedback)
+            if isinstance(feedback, dict):
+                feedback_str = str(feedback.get("feedback", "false_alarm"))
+            else:
+                feedback_str = str(feedback)
 
-        record = self.pending_events.pop(event_id)
-        x = record["context"]
-        action = record["action"]
+            record = self.pending_events.pop(event_id)
+            x = record["context"]
+            action = record["action"]
 
-        r = self.calculate_reward(action, feedback_str)
+            r = self.calculate_reward(action, feedback_str)
 
-        # Online Bayesian matrix update:
-        # A_a <- A_a + x x^T
-        # b_a <- b_a + r * x
-        self.A[action] += x @ x.T
-        self.b[action] += r * x
+            # Online Bayesian matrix update:
+            # A_a <- A_a + x x^T
+            # b_a <- b_a + r * x
+            self.A[action] += x @ x.T
+            self.b[action] += r * x
 
-        return True
+            return True
 
     def retrain(
         self,
@@ -430,21 +455,23 @@ class ContextualBandit:
         except ValueError:
             next_version = f"{self.policy_version}_new"
 
-        # Validation Gate check
-        if validation_score >= min_validation_score:
-            self.previous_A = {a: self.A[a].copy() for a in ACTIONS}
-            self.previous_b = {a: self.b[a].copy() for a in ACTIONS}
-            self.previous_version = self.policy_version
+        # Validation Gate check — lock protects state swap from concurrent update() calls
+        with self._lock:
+            if validation_score >= min_validation_score:
+                self.previous_A = {a: self.A[a].copy() for a in ACTIONS}
+                self.previous_b = {a: self.b[a].copy() for a in ACTIONS}
+                self.previous_version = self.policy_version
 
-            self.A = candidate_A
-            self.b = candidate_b
-            self.policy_version = next_version
-            deployed = True
-        else:
-            deployed = False
+                self.A = candidate_A
+                self.b = candidate_b
+                self.policy_version = next_version
+                deployed = True
+            else:
+                deployed = False
 
         record = {
-            "policy_version": self.policy_version if deployed else next_version,
+            # Always report the currently active (live) version — not the rejected candidate
+            "policy_version": self.policy_version,
             "trained_at": now_iso,
             "validation_score": round(validation_score, 4),
             "previous_version": self.previous_version,
@@ -454,7 +481,8 @@ class ContextualBandit:
 
     def rollback(self) -> str:
         """Rollback active policy to previous_version."""
-        self.A = {a: self.previous_A[a].copy() for a in ACTIONS}
-        self.b = {a: self.previous_b[a].copy() for a in ACTIONS}
-        self.policy_version = self.previous_version
-        return self.policy_version
+        with self._lock:
+            self.A = {a: self.previous_A[a].copy() for a in ACTIONS}
+            self.b = {a: self.previous_b[a].copy() for a in ACTIONS}
+            self.policy_version = self.previous_version
+            return self.policy_version

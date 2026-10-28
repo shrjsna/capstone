@@ -42,10 +42,10 @@ and how we avoid stepping on each other while working simultaneously.
 
 ## Current Status
 <!-- Update this section as the project progresses -->
-- [ ] `INTERFACES.md` locked and agreed
+- [x] `INTERFACES.md` locked and agreed
 - [ ] PPE detection — baseline trained
 - [ ] Zone intrusion — detection + tracking working
-- [ ] Bandit — offline-trained baseline policy
-- [ ] Backend — event ingestion + feedback endpoint live
+- [x] Bandit — offline-trained baseline policy (`cloud/decision_layer/` complete + tested)
+- [x] Backend — event ingestion + feedback endpoint live (`cloud/backend/` complete + tested)
 - [ ] Dashboard — alert feed + feedback buttons
 - [ ] Federation — 2+ simulated sites demoed

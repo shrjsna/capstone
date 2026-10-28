@@ -75,7 +75,7 @@ def train_offline_baseline():
     record = bandit.retrain(
         training_batch=training_batch,
         validation_set=validation_set,
-        min_validation_score=0.60
+        min_validation_score=0.70
     )
 
     print("=== Offline Baseline Policy Training Complete ===")

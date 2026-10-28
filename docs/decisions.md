@@ -88,4 +88,23 @@ rather than waiting for operator feedback confirmation.
 Why: trades responsiveness for simplicity within the capstone timeline; a
 feedback-gated threshold update is noted as future work.
 
+## 2026-10-28 — Code audit fixes (7 issues resolved)
+Decided: apply all findings from internal code audit before further development.
 
+1. **Duplicate event_id guard**: `predict()` now raises `ValueError` if the same
+   event_id is submitted twice without an intervening `update()`. Prevents silently
+   rewarding the wrong action context.
+2. **Pending events memory cap**: `pending_events` capped at `MAX_PENDING_EVENTS = 10_000`;
+   oldest unacknowledged event evicted on overflow. Prevents unbounded memory growth
+   in a 24/7 deployment.
+3. **UUID-based auto-generated event IDs**: Replaced `hash() % 1_000_000` (1M IDs)
+   with `uuid4().hex[:12]` giving a 2^48 collision-free ID space.
+4. **Gate-fail record version fixed**: `retrain()` record now always reports the
+   currently active policy version, not the rejected candidate. Prevents dashboards
+   from showing a version that was never deployed.
+5. **Thread safety**: `update()`, gate state-swap in `retrain()`, and `rollback()`
+   wrapped with `threading.Lock()` to prevent data races from concurrent FastAPI requests.
+6. **FEATURE_DIM shape assertion**: `extract_features()` now asserts `x.shape == (d, 1)`,
+   failing loudly if features are added/removed without updating the constant.
+7. **min_validation_score standardised to 0.70**: `train_baseline.py` was using 0.60;
+   aligned to match `retrain()` default so the whole project uses one consistent threshold.
