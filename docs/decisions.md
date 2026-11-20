@@ -169,3 +169,31 @@ Why: prevents directory traversal attacks (`../../`) and arbitrary file write/ov
 across zone configuration and process execution subsystems.
 
 
+
+## 2026-10-29 — Role-Based Access Control (RBAC), Cookie Sessions, Append-Only Audit Trail, and Black/White/Orange Theme
+
+### Context
+The previous security posture relied on a single shared secret (`"aegis-secret-key-2026"`) exposed in `dashboard/app.js` and startup output, with read routes left completely unauthenticated and no concept of user identity or accountability. Any holder of the key possessed unrestricted permissions (including federated learning execution, model parameter resets, and data purging).
+
+### Decision
+1. **Three-Tier Role Model:**
+   - `admin`: Full administrative access (user management, edge keys, federated learning, retention cleanup, process control, zone configuration, custom RTSP streams, audit trail review).
+   - `operator`: Restricted operational access (view alert feed, acknowledge/confirm alerts, review thresholds and policy progression, view live stream from built-in sources). Restricted from launching processes, editing zones, or changing system settings.
+   - `edge`: Minimal service access. Authorized strictly to submit detection events via `POST /events` using unique prefix-based API keys (`aegis_edge_<prefix>_<secret>`).
+2. **Default-Deny Middleware Enforcement:**
+   - Every route in the FastAPI/Starlette application is explicitly registered in an authoritative `PERMISSION_TABLE`.
+   - Any request matching an unmapped route or route missing a table entry is immediately refused with `403 Forbidden` and audited.
+3. **Browser Session Security & CSRF:**
+   - Replaced localStorage shared key with `HttpOnly`, `SameSite=Strict` session cookies.
+   - Passwords hashed using Argon2id (`argon2-cffi`) with anti-timing dummy verification.
+   - Brute-force throttling locks accounts for 15 minutes after 5 consecutive failures.
+   - Mutating state-changing requests enforce double-submit CSRF token validation (`X-CSRF-Token`).
+   - Forced password update workflow (`must_change_password=1`) isolates accounts until credentials are reset.
+4. **Append-Only Database Audit Trail:**
+   - Database engine enforces immutability on `audit_log` via SQLite triggers (`audit_log_no_update`, `audit_log_no_delete`) raising `RAISE(ABORT, ...)`.
+   - All access denials (401/403), logins, logouts, stream changes, zone edits, process launches, and account operations are immutably logged with client IP provenance.
+5. **Zero-Secret Backend-Internal Credential:**
+   - Live stream worker and child process manager communicate with the backend using an ephemeral, 256-bit in-memory token (`INTERNAL_STREAM_KEY`) generated once per process lifecycle. No static secrets exist in source code or version control.
+6. **Black, White, and Orange Design System:**
+   - Replaced arbitrary multi-color badges and accents with a strict industrial palette: `--bg: #0A0A0A`, `--surface: #141414`, `--surface-2: #1E1E1E`, `--border: #2E2E2E`, `--text: #FFFFFF`, `--text-muted: #A3A3A3`, `--accent: #FF6A00`.
+   - Verified 100% compliance across HTML, CSS, and JS with automated AST/regex linting (`tools/check_theme.py`).

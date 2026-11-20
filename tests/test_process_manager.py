@@ -41,7 +41,9 @@ def reset_process_manager():
     pm.stop_all()
 
 
-client = TestClient(app)
+@pytest.fixture()
+def client(admin_client):
+    return admin_client
 
 
 # =========================================================================
@@ -103,7 +105,7 @@ def test_validate_source_reject_nonexistent_file():
 # 2. Process Manager API Endpoints Tests
 # =========================================================================
 
-def test_get_processes_list():
+def test_get_processes_list(client):
     resp = client.get("/processes")
     assert resp.status_code == 200
     data = resp.json()
@@ -113,7 +115,7 @@ def test_get_processes_list():
     assert "zone_pipeline" in names
 
 
-def test_get_processes_unknown_name_returns_404():
+def test_get_processes_unknown_name_returns_404(client):
     resp = client.post("/processes/non_existent/start")
     assert resp.status_code == 404
     resp = client.post("/processes/non_existent/stop")
@@ -122,7 +124,7 @@ def test_get_processes_unknown_name_returns_404():
     assert resp.status_code == 404
 
 
-def test_start_zone_pipeline_endpoint():
+def test_start_zone_pipeline_endpoint(client):
     with patch("cloud.backend.process_manager.ProcessManager._run_zone_pipeline"):
         resp = client.post(
             "/processes/zone_pipeline/start",
@@ -142,7 +144,7 @@ def test_start_zone_pipeline_endpoint():
         assert resp_dup.json()["status"] == "running"
 
 
-def test_start_federated_demo_endpoint():
+def test_start_federated_demo_endpoint(client):
     with patch("cloud.backend.process_manager.ProcessManager._run_federated_demo"):
         resp = client.post("/processes/federated_demo/start")
         assert resp.status_code == 200
@@ -156,7 +158,7 @@ def test_start_federated_demo_endpoint():
         assert resp_dup.json()["status"] == "running"
 
 
-def test_start_zone_pipeline_invalid_source_returns_400():
+def test_start_zone_pipeline_invalid_source_returns_400(client):
     resp = client.post(
         "/processes/zone_pipeline/start",
         json={"source": "invalid;metachar"},
@@ -164,7 +166,7 @@ def test_start_zone_pipeline_invalid_source_returns_400():
     assert resp.status_code == 400
 
 
-def test_stop_unstarted_process_returns_stopped():
+def test_stop_unstarted_process_returns_stopped(client):
     resp = client.post("/processes/zone_pipeline/stop")
     assert resp.status_code == 200
     data = resp.json()
@@ -172,7 +174,7 @@ def test_stop_unstarted_process_returns_stopped():
     assert data["status"] == "stopped"
 
 
-def test_stop_running_process():
+def test_stop_running_process(client):
     pm = get_process_manager()
     proc = pm.get_process_state("zone_pipeline")
 
@@ -193,7 +195,7 @@ def test_stop_running_process():
 
 
 
-def test_get_process_logs():
+def test_get_process_logs(client):
     pm = get_process_manager()
     proc = pm.get_process_state("federated_demo")
     proc.append_log("Log line 1")
@@ -211,7 +213,7 @@ def test_get_process_logs():
 # 3. Crash-Detection State Transition Test
 # =========================================================================
 
-def test_crash_detection_state_transition():
+def test_crash_detection_state_transition(client):
     pm = get_process_manager()
     proc = pm.get_process_state("zone_pipeline")
 
@@ -245,27 +247,27 @@ def test_crash_detection_state_transition():
 # 4. Single-Process Dashboard Static Serving Tests
 # =========================================================================
 
-def test_static_dashboard_html_served_on_root():
+def test_static_dashboard_html_served_on_root(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "AEGIS" in resp.text
     assert "Control Panel" in resp.text
 
 
-def test_static_styles_css_served():
+def test_static_styles_css_served(client):
     resp = client.get("/styles.css")
     assert resp.status_code == 200
     assert "control-layout" in resp.text
 
 
-def test_static_app_js_served():
+def test_static_app_js_served(client):
     resp = client.get("/app.js")
     assert resp.status_code == 200
     assert "buildDefaultApiUrl" in resp.text
     assert "loadProcessStatus" in resp.text
 
 
-def test_api_routes_not_shadowed_by_static_mount():
+def test_api_routes_not_shadowed_by_static_mount(client):
     # Confirm health check and existing endpoints still return JSON
     resp = client.get("/health")
     assert resp.status_code == 200

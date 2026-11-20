@@ -203,8 +203,11 @@ def post_event(event: Dict[str, Any], api_url: str, api_key: Optional[str] = Non
     """Send event JSON payload to backend endpoint via HTTP POST with API key authentication."""
     try:
         import requests
-        key = api_key or os.getenv("AEGIS_API_KEY", "aegis-secret-key-2026")
-        headers = {"X-API-Key": key} if key else {}
+        key = api_key or os.getenv("AEGIS_EDGE_API_KEY")
+        if not key:
+            logger.warning("[standalone] No edge API key provided; skipping POST to %s", api_url)
+            return False
+        headers = {"X-API-Key": key}
         resp = requests.post(api_url, json=event, headers=headers, timeout=5)
         resp.raise_for_status()
         return True
@@ -224,6 +227,7 @@ def run_inference(
     output_log: str = "events_log.jsonl",
     show: bool = False,
     save_video: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> None:
     """Run YOLOv11 + ByteTrack inference pipeline on video/stream."""
     try:
@@ -304,7 +308,7 @@ def run_inference(
             log_event(event, log_path)
 
             if api_url:
-                post_event(event, api_url)
+                post_event(event, api_url, api_key=api_key)
 
     logger.info("Inference completed. Events written to %s", log_path)
 
@@ -318,6 +322,7 @@ def main():
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--debounce", type=int, default=3, help="Consecutive frames debounce count")
     parser.add_argument("--api-url", default=None, help="Backend URL to POST events to")
+    parser.add_argument("--api-key", default=None, help="Edge API key (or set AEGIS_EDGE_API_KEY env var)")
     parser.add_argument("--output-log", default="events_log.jsonl", help="Path to output JSONL log file")
     parser.add_argument("--show", action="store_true", help="Display annotated live video window")
     parser.add_argument("--save-video", default=None, help="Path or flag to save output video")
@@ -331,6 +336,7 @@ def main():
         conf=args.conf,
         debounce_frames=args.debounce,
         api_url=args.api_url,
+        api_key=args.api_key or os.getenv("AEGIS_EDGE_API_KEY"),
         output_log=args.output_log,
         show=args.show,
         save_video=args.save_video,

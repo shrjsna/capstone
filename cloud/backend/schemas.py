@@ -80,7 +80,7 @@ class StreamStartRequest(BaseModel):
     camera_id: str = Field("stream_cam", min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-\.]+$")
     zone_id: str = Field("stream_zone", min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-\.]+$")
     debounce_frames: int = Field(3, ge=1, le=100)
-    conf_threshold: float = Field(0.25, ge=0.01, le=1.0)
+    conf_threshold: float = Field(0.60, ge=0.01, le=1.0)
 
 
 class ZoneSaveRequest(BaseModel):

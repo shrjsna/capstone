@@ -141,8 +141,8 @@ def setup_db_and_stream():
 
 
 @pytest.fixture()
-def client():
-    return TestClient(app)
+def client(admin_client):
+    return admin_client
 
 
 @pytest.fixture()

@@ -79,11 +79,17 @@ class ContextualBandit:
 
         # In-memory storage mapping event_id -> {"context": x, "action": action, "timestamp": ts}
         self.pending_events: Dict[str, Dict] = {}
+        self.update_count: int = 0
 
     def get_threshold(self, camera_id: str, zone_id: str) -> float:
         """Retrieve current dynamic detection threshold for a given camera and zone."""
         key = f"{camera_id}:{zone_id}"
-        return self.thresholds.get(key, DEFAULT_THRESHOLD)
+        if key in self.thresholds:
+            return self.thresholds[key]
+        z_lower = str(zone_id).lower()
+        if z_lower in self.thresholds:
+            return self.thresholds[z_lower]
+        return DEFAULT_THRESHOLD
 
     def extract_features(self, event: Dict) -> np.ndarray:
         """
@@ -265,6 +271,7 @@ class ContextualBandit:
         self.pending_events[event_id] = {
             "context": x,
             "action": action,
+            "event": event,
             "timestamp": event.get("timestamp", datetime.datetime.now(datetime.timezone.utc).isoformat()),
         }
 
@@ -301,28 +308,36 @@ class ContextualBandit:
         else:
             return 0.0
 
-    def update(self, event_id: str, feedback: Union[Dict, str]) -> bool:
+    def update(
+        self,
+        event_id: str,
+        feedback: Union[Dict, str],
+        fallback_event: Optional[Dict] = None,
+        fallback_action: Optional[str] = None,
+    ) -> bool:
         """
         Incrementally update model state based on operator feedback.
-
-        Args:
-            event_id: Event ID matching a prior predict() call.
-            feedback: Operator feedback dict matching INTERFACES.md schema or raw string ('confirmed'/'false_alarm').
-
-        Returns:
-            bool: True if event_id was found and model updated, False if event_id is unrecognized.
+        Supports fallback event context so updates succeed across server restarts.
         """
-        if event_id not in self.pending_events:
-            return False
-
         if isinstance(feedback, dict):
             feedback_str = str(feedback.get("feedback", "false_alarm"))
         else:
             feedback_str = str(feedback)
 
-        record = self.pending_events.pop(event_id)
-        x = record["context"]
-        action = record["action"]
+        event_ctx = None
+        if event_id in self.pending_events:
+            record = self.pending_events.pop(event_id)
+            x = record["context"]
+            action = record["action"]
+            event_ctx = record.get("event")
+        elif fallback_event:
+            x = self.extract_features(fallback_event)
+            action = fallback_action or fallback_event.get("bandit_action") or "escalate"
+            if action not in self.A:
+                action = "escalate"
+            event_ctx = fallback_event
+        else:
+            return False
 
         r = self.calculate_reward(action, feedback_str)
 
@@ -331,6 +346,28 @@ class ContextualBandit:
         # b_a <- b_a + r * x
         self.A[action] += x @ x.T
         self.b[action] += r * x
+        self.update_count += 1
+
+        # Human-in-the-Loop Zone Sensitivity Threshold Auto-Calibration
+        # False alarm -> operator rejected noise -> raise threshold by +0.02 (bounded at 0.90) to reduce false alerts
+        # Confirmed -> operator confirmed true hazard -> gently tune threshold by -0.01 (bounded at 0.50) to stay sensitive
+        if event_ctx and isinstance(event_ctx, dict):
+            cam_id = str(event_ctx.get("camera_id", "default_cam"))
+            z_id = str(event_ctx.get("zone_id", "default_zone"))
+            z_key = f"{cam_id}:{z_id}"
+            z_name = z_id.lower()
+            current_th = self.get_threshold(cam_id, z_id)
+
+            if feedback_str == "false_alarm":
+                new_th = min(0.90, current_th + 0.02)
+            elif feedback_str == "confirmed":
+                new_th = max(0.50, current_th - 0.01)
+            else:
+                new_th = current_th
+
+            new_th = round(new_th, 4)
+            self.thresholds[z_key] = new_th
+            self.thresholds[z_name] = new_th
 
         return True
 

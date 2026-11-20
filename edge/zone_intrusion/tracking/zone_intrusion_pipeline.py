@@ -47,6 +47,9 @@ def parse_args():
                         help="Optional backend URL to POST fired zone-intrusion events to "
                              "(e.g. http://127.0.0.1:8000/events). If omitted, events are "
                              "written to --events_log only.")
+    parser.add_argument("--api-key", type=str, default=None,
+                        dest="api_key",
+                        help="Edge API key for backend event submission (or set AEGIS_EDGE_API_KEY)")
     parser.add_argument("--camera-id", type=str, default=None,
                         dest="camera_id",
                         help="Override the camera_id emitted in events (defaults to the "
@@ -71,8 +74,11 @@ def post_event(event, api_url, api_key=None):
     try:
         import os
         import requests
-        key = api_key or os.getenv("AEGIS_API_KEY", "aegis-secret-key-2026")
-        headers = {"X-API-Key": key} if key else {}
+        key = api_key or os.getenv("AEGIS_EDGE_API_KEY")
+        if not key:
+            print(f"[zone-pipeline] No edge API key provided; skipping event POST to {api_url}")
+            return False
+        headers = {"X-API-Key": key}
         resp = requests.post(api_url, json=event, headers=headers, timeout=5)
         resp.raise_for_status()
         return True
@@ -120,10 +126,14 @@ def main():
     recorder = RollingClipRecorder(source_fps=args.source_fps,
                                     on_clip_ready=on_clip_ready)
 
+    effective_key = args.api_key or os.getenv("AEGIS_EDGE_API_KEY")
     print(f"Zone loaded: {zone['zone_id']} on {camera_id}")
     print(f"Debounce: {args.debounce_frames} consecutive frames required")
     if args.api_url:
-        print(f"Events will be POSTed to: {args.api_url}")
+        if effective_key:
+            print(f"Events will be POSTed to: {args.api_url}")
+        else:
+            print(f"[zone-pipeline] Notice: No edge API key provided. Events will be logged locally only.")
     print("Press 'q' in the video window to quit.\n")
 
     # Draw the zone polygon on every frame so you can SEE it overlaid on the
@@ -182,7 +192,7 @@ def main():
                     print()
                     log_event(event, args.events_log)
                     if args.api_url:
-                        post_event(event, args.api_url)
+                        post_event(event, args.api_url, api_key=effective_key)
 
                     event_id = f"{event['tracked_id']}_{event['timestamp'].replace(':', '-')}"
                     recorder.trigger(event_id)

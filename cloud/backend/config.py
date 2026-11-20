@@ -5,10 +5,13 @@ Centralized configuration for the AEGIS Industrial Safety System.
 Loads settings from environment variables with production-safe defaults.
 """
 
+import logging
 import os
 import socket
 from pathlib import Path
 from typing import List
+
+logger = logging.getLogger("aegis.config")
 
 # Repository Root
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,9 +40,30 @@ class Settings:
         self.HOST: str = os.getenv("AEGIS_HOST", "0.0.0.0")
         self.PORT: int = int(os.getenv("AEGIS_PORT", "8000"))
 
-        # Authentication: shared secret API key
-        self.API_KEY: str = os.getenv("AEGIS_API_KEY", "aegis-secret-key-2026")
-        self.AUTH_ENABLED: bool = os.getenv("AEGIS_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+        # Legacy auth settings deprecation handling
+        if "AEGIS_AUTH_ENABLED" in os.environ:
+            logger.warning(
+                "[config] Notice: AEGIS_AUTH_ENABLED is deprecated and ignored; "
+                "Role-Based Access Control is permanently enabled."
+            )
+        if "AEGIS_API_KEY" in os.environ:
+            logger.warning(
+                "[config] Notice: AEGIS_API_KEY shared secret is deprecated; "
+                "Use scoped edge keys or user session credentials."
+            )
+
+        # RBAC & Session Tunables
+        self.SESSION_IDLE_MIN: int = int(os.getenv("AEGIS_SESSION_IDLE_MIN", "30"))
+        self.SESSION_ABSOLUTE_HOURS: int = int(os.getenv("AEGIS_SESSION_ABSOLUTE_HOURS", "12"))
+        self.COOKIE_SECURE: bool = os.getenv("AEGIS_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+        self.LOGIN_MAX_FAILURES: int = int(os.getenv("AEGIS_LOGIN_MAX_FAILURES", "5"))
+        self.LOGIN_LOCKOUT_MINUTES: int = int(os.getenv("AEGIS_LOGIN_LOCKOUT_MINUTES", "5"))
+        self.MIN_PASSWORD_LENGTH: int = int(os.getenv("AEGIS_MIN_PASSWORD_LENGTH", "12"))
+        self.DOCS_ENABLED: bool = os.getenv("AEGIS_DOCS_ENABLED", "true").lower() in ("true", "1", "yes")
+
+        # Proxy settings
+        raw_proxies = os.getenv("AEGIS_TRUSTED_PROXIES", "")
+        self.TRUSTED_PROXIES: List[str] = [p.strip() for p in raw_proxies.split(",") if p.strip()]
 
         # Data Retention & Cleanup
         self.RETENTION_DAYS: int = int(os.getenv("AEGIS_RETENTION_DAYS", "7"))
@@ -55,7 +79,13 @@ class Settings:
         """Compute allowed CORS origins."""
         raw = os.getenv("CORS_ALLOWED_ORIGINS")
         if raw:
-            return [o.strip() for o in raw.split(",") if o.strip()]
+            origins = [o.strip() for o in raw.split(",") if o.strip()]
+            if "*" in origins:
+                raise ValueError(
+                    "Wildcard '*' in CORS_ALLOWED_ORIGINS is rejected when cookie credentials are used. "
+                    "Specify exact origins."
+                )
+            return origins
 
         lan_ip = get_lan_ip()
         origins = [

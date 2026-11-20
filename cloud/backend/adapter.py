@@ -8,7 +8,7 @@ See docs/decisions.md for the dated decision entry.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Optional
 from cloud.backend.schemas import DetectionEventCreate, BanditDecisionOutput, OperatorFeedbackCreate
 from cloud.decision_layer.bandit import ContextualBandit
 
@@ -22,7 +22,12 @@ class BanditAdapter(ABC):
         pass
 
     @abstractmethod
-    def submit_feedback(self, feedback: OperatorFeedbackCreate) -> None:
+    def submit_feedback(
+        self,
+        feedback: OperatorFeedbackCreate,
+        fallback_event: Optional[Dict] = None,
+        fallback_action: Optional[str] = None,
+    ) -> None:
         """Forwards human operator feedback to the decision layer to update policy rewards."""
         pass
 
@@ -90,24 +95,34 @@ class RealBanditAdapter(BanditAdapter):
             threshold_used=decision["threshold_used"],
         )
 
-    def submit_feedback(self, feedback: OperatorFeedbackCreate) -> None:
-        """Forward operator feedback to the real bandit's online update step."""
-        self.bandit.update(feedback.event_id, feedback.feedback)
+    def submit_feedback(
+        self,
+        feedback: OperatorFeedbackCreate,
+        fallback_event: Optional[Dict] = None,
+        fallback_action: Optional[str] = None,
+    ) -> None:
+        """Forward operator feedback to the real bandit's online update step with fallback context."""
+        self.bandit.update(
+            feedback.event_id,
+            feedback.feedback,
+            fallback_event=fallback_event,
+            fallback_action=fallback_action,
+        )
 
     def get_zone_thresholds(self) -> Dict[str, float]:
         """
         Return the bandit's current per-camera/zone threshold registry.
-        Keys in bandit.thresholds are "camera_id:zone_id"; we return them as-is
-        plus 'default', 'zone_a', 'zone_b' fallbacks.
+        Returns clean per-zone sensitivity thresholds (e.g. default, zone_a, zone_b).
         """
         from cloud.decision_layer.bandit import DEFAULT_THRESHOLD
-        thresholds = dict(self.bandit.thresholds)
-        if "default" not in thresholds:
-            thresholds["default"] = DEFAULT_THRESHOLD
-        if "zone_a" not in thresholds:
-            thresholds["zone_a"] = self.bandit.get_threshold("default_cam", "zone_a")
-        if "zone_b" not in thresholds:
-            thresholds["zone_b"] = self.bandit.get_threshold("default_cam", "zone_b")
+        thresholds = {
+            "default": self.bandit.thresholds.get("default", DEFAULT_THRESHOLD),
+            "zone_a": self.bandit.thresholds.get("zone_a", self.bandit.get_threshold("default_cam", "zone_a")),
+            "zone_b": self.bandit.thresholds.get("zone_b", self.bandit.get_threshold("default_cam", "zone_b")),
+        }
+        for k, v in self.bandit.thresholds.items():
+            if k not in thresholds and ":" not in k:
+                thresholds[k] = v
         return thresholds
 
 
@@ -138,7 +153,12 @@ class MockBanditAdapter(BanditAdapter):
             threshold_used=threshold
         )
 
-    def submit_feedback(self, feedback: OperatorFeedbackCreate) -> None:
+    def submit_feedback(
+        self,
+        feedback: OperatorFeedbackCreate,
+        fallback_event: Optional[Dict] = None,
+        fallback_action: Optional[str] = None,
+    ) -> None:
         if feedback.feedback == "confirmed":
             for zone in self.zone_thresholds:
                 self.zone_thresholds[zone] = max(0.40, round(self.zone_thresholds[zone] - 0.02, 3))

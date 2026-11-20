@@ -282,7 +282,7 @@ def _draw_zone_annotations(frame, zone_config: Dict, boxes,
 
 
 def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional[str],
-                   debounce_frames: int, conf_threshold: float) -> None:
+                   debounce_frames: int, conf_threshold: float, api_key: Optional[str] = None) -> None:
     """
     Background thread: open source, run inference loop, put JPEG frames into state.
     Exits when state.running becomes False or an unrecoverable error occurs.
@@ -426,7 +426,7 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
                 )
                 logger.warning("[stream] PPE event: %s conf=%.2f", event["class"], event["confidence"])
                 if events_api_url:
-                    post_event(event, events_api_url)
+                    post_event(event, events_api_url, api_key=api_key)
 
         # 2. Zone intrusion processing (in 'zone_intrusion' mode or 'all'/'combined' mode)
         if state.mode in ("zone_intrusion", "all", "combined") and _ZONE_SUPPORT and zone_config:
@@ -459,7 +459,7 @@ def _stream_worker(state: StreamState, model_path: str, events_api_url: Optional
                             }
                             logger.warning("[stream] Zone intrusion event: person_%s", tid)
                             if events_api_url:
-                                post_event(event, events_api_url)
+                                post_event(event, events_api_url, api_key=api_key)
 
                 # Reset zone debouncer for persons NOT in zone this frame
                 if r.boxes is not None and r.boxes.id is not None and zone_debouncer:
@@ -515,7 +515,8 @@ def start_stream(
     zone_id: str = "stream_zone",
     events_api_url: Optional[str] = None,
     debounce_frames: int = 3,
-    conf_threshold: float = 0.25,
+    conf_threshold: float = 0.60,
+    api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Start a background inference stream safely with re-entrancy protection.
@@ -555,7 +556,7 @@ def start_stream(
 
         thread = threading.Thread(
             target=_stream_worker,
-            args=(state, model_path, events_api_url, debounce_frames, conf_threshold),
+            args=(state, model_path, events_api_url, debounce_frames, conf_threshold, api_key),
             daemon=True,
             name="aegis-stream-worker",
         )

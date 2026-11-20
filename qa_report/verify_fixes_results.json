@@ -1,0 +1,40 @@
+{
+  "fix1_375px": {
+    "pass": false,
+    "details": {
+      "titleBandOrder": "0",
+      "asideOrder": "1",
+      "feedPanelOrder": "2",
+      "titleTop": 5744.89990234375,
+      "asideTop": 5833.7001953125,
+      "feedTop": 6472,
+      "formCreateUserTop": 5891.80029296875,
+      "isAsideAfterTitleBand": true,
+      "isAsideBeforeTables": true
+    }
+  },
+  "fix1_900px": {
+    "pass": false,
+    "details": {
+      "titleBandOrder": "0",
+      "asideOrder": "1",
+      "feedPanelOrder": "2",
+      "titleTop": 4870.10009765625,
+      "asideTop": 4962.5,
+      "feedTop": 5600.80029296875,
+      "formCreateUserTop": 5020.60009765625,
+      "isAsideAfterTitleBand": true,
+      "isAsideBeforeTables": true
+    }
+  },
+  "fix2_offline_login": {
+    "pass": false,
+    "details": {
+      "googleFontLinksCount": 0,
+      "brandTitleFontFamily": "",
+      "cardTitleFontFamily": "",
+      "bodyFontFamily": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif"
+    },
+    "external_requests": []
+  }
+}

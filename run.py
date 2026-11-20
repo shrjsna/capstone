@@ -86,7 +86,20 @@ def main():
     lan_url = f"http://{lan_ip}:{port}"
     health_url = f"http://127.0.0.1:{port}/health"
 
-    auth_display = f"ACTIVE ({settings.API_KEY[:4]}...)" if settings.AUTH_ENABLED else "DISABLED"
+    auth_display = "RBAC (Admin, Operator, Edge)"
+
+    # Check administrator account status
+    try:
+        from cloud.backend.database import SessionLocal, init_db
+        from cloud.backend.models import UserModel
+        init_db()
+        db = SessionLocal()
+        admin_exists = db.query(UserModel).filter(UserModel.role == "admin", UserModel.active == 1).first()
+        db.close()
+        if not admin_exists:
+            print("[!] Notice: No administrator exists. Run: python -m cloud.backend.manage create-admin")
+    except Exception:
+        pass
 
     banner = f"""
 ======================================================================
@@ -95,7 +108,7 @@ def main():
   Localhost URL:   {local_url}
   LAN / Phone URL: {lan_url}
   Health Check:    {health_url}
-  API Auth:        {auth_display}
+  Access Control:  {auth_display}
   Retention:       {settings.RETENTION_DAYS} days max / {settings.MAX_STORED_EVENTS} events cap
   Press Ctrl+C to shut down all processes cleanly.
 ======================================================================

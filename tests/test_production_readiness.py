@@ -102,7 +102,8 @@ class TestAuthentication:
             elif method == "DELETE":
                 res = client.delete(path)
             assert res.status_code == 401, f"{method} {path} should be 401 without auth, got {res.status_code}"
-            assert "Unauthorized" in res.json().get("detail", "")
+            detail = str(res.json())
+            assert "AUTH_REQUIRED" in detail or "Authentication required" in detail
 
     def test_invalid_api_key_rejected(self):
         """Requests with incorrect API key must be rejected with 401."""
@@ -110,14 +111,10 @@ class TestAuthentication:
         headers = {"X-API-Key": "completely-wrong-key"}
         res = client.post("/events", json={"camera_id": "c1", "zone_id": "z1", "event_type": "ppe_violation", "class": "no_helmet", "confidence": 0.9, "tracked_id": "t1", "timestamp": "2026-09-29T12:00:00Z", "frame_count_triggered": 5}, headers=headers)
         assert res.status_code == 401
-        assert "Invalid API key" in res.json()["detail"]
+        assert "AUTH_REQUIRED" in str(res.json())
 
-    def test_valid_api_key_accepted_via_header_or_bearer(self):
-        """Requests with correct API key via X-API-Key or Bearer token succeed."""
-        client = TestClient(app)
-
-        # 1. Via X-API-Key
-        headers1 = {"X-API-Key": "test-secret-key-123"}
+    def test_valid_edge_key_accepted_and_bearer_rejected(self, edge_client, admin_client):
+        """Edge key accepted for event ingestion; Bearer header is rejected."""
         payload = {
             "camera_id": "cam_auth_01",
             "zone_id": "zone_auth_a",
@@ -129,32 +126,28 @@ class TestAuthentication:
             "frame_count_triggered": 4,
             "clip_captured": False,
         }
-        res1 = client.post("/events", json=payload, headers=headers1)
+        res1 = edge_client.post("/events", json=payload)
         assert res1.status_code == 201
         ev_id = res1.json()["event_id"]
 
-        # 2. Via Authorization: Bearer
-        headers2 = {"Authorization": "Bearer test-secret-key-123"}
-        fb_payload = {
-            "event_id": ev_id,
-            "feedback": "confirmed",
-            "operator_id": "op_admin_test",
-            "timestamp": "2026-09-29T12:01:00Z",
-        }
-        res2 = client.post("/feedback", json=fb_payload, headers=headers2)
-        assert res2.status_code == 200
-        assert res2.json()["status"] == "success"
+        # Bearer token is rejected under RBAC policy
+        raw_client = TestClient(app)
+        res_bearer = raw_client.post("/feedback", json={"event_id": ev_id, "feedback": "confirmed", "operator_id": "op_test", "timestamp": "2026-09-29T12:01:00Z"}, headers={"Authorization": "Bearer some-key"})
+        assert res_bearer.status_code == 401
 
-    def test_read_only_endpoints_open(self):
-        """Read-only monitoring endpoints must remain open without auth headers."""
-        client = TestClient(app)
-        assert client.get("/health").status_code == 200
-        assert client.get("/alerts").status_code == 200
-        assert client.get("/zones").status_code == 200
-        assert client.get("/thresholds").status_code == 200
-        assert client.get("/policy-history").status_code == 200
-        assert client.get("/processes").status_code == 200
-        assert client.get("/stream/status").status_code == 200
+    def test_health_open_monitoring_protected_by_rbac(self, operator_client):
+        """Health check is open unauthenticated; monitoring endpoints require operator/admin role."""
+        raw_client = TestClient(app)
+        assert raw_client.get("/health").status_code == 200
+        assert raw_client.get("/alerts").status_code == 401
+        assert raw_client.get("/thresholds").status_code == 401
+
+        # With operator session, monitoring endpoints succeed
+        assert operator_client.get("/alerts").status_code == 200
+        assert operator_client.get("/zones").status_code == 200
+        assert operator_client.get("/thresholds").status_code == 200
+        assert operator_client.get("/policy-history").status_code == 200
+        assert operator_client.get("/stream/status").status_code == 200
 
 
 # ===========================================================================
@@ -164,9 +157,9 @@ class TestAuthentication:
 class TestInputValidation:
     """Ensure strict validation rejects directory traversal, shell chars, and malformed inputs."""
 
-    def test_zone_save_path_traversal_rejected(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_zone_save_path_traversal_rejected(self, admin_client):
+        client = admin_client
+        headers = {}
 
         # Traversal in camera_id
         res1 = client.post("/zones", json={"camera_id": "../../etc", "zone_id": "z1", "polygon": [[0, 0], [10, 0], [10, 10]]}, headers=headers)
@@ -176,15 +169,15 @@ class TestInputValidation:
         res2 = client.post("/zones", json={"camera_id": "cam01", "zone_id": "../passwd", "polygon": [[0, 0], [10, 0], [10, 10]]}, headers=headers)
         assert res2.status_code == 422
 
-    def test_zone_delete_path_traversal_rejected(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_zone_delete_path_traversal_rejected(self, admin_client):
+        client = admin_client
+        headers = {}
         res = client.delete("/zones/..%2F..%2Fetc/shadow", headers=headers)
-        assert res.status_code in (404, 405, 422)
+        assert res.status_code in (403, 404, 405, 422)
 
-    def test_stream_start_unsafe_source_rejected(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_stream_start_unsafe_source_rejected(self, admin_client):
+        client = admin_client
+        headers = {}
 
         # Traversal in local video path
         res1 = client.post("/stream/start", json={"source": "../../boot.ini", "mode": "ppe"}, headers=headers)
@@ -194,15 +187,15 @@ class TestInputValidation:
         res2 = client.post("/stream/start", json={"source": "rtsp://192.168.1.1/live; rm -rf /", "mode": "ppe"}, headers=headers)
         assert res2.status_code == 422
 
-    def test_stream_start_unsafe_model_path_rejected(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_stream_start_unsafe_model_path_rejected(self, admin_client):
+        client = admin_client
+        headers = {}
         res = client.post("/stream/start", json={"source": "0", "mode": "ppe", "model_path": "../../secret.pt"}, headers=headers)
         assert res.status_code == 422
 
-    def test_feedback_invalid_operator_id_rejected(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_feedback_invalid_operator_id_rejected(self, admin_client):
+        client = admin_client
+        headers = {}
         # Operator ID with shell metacharacters
         res = client.post("/feedback", json={"event_id": "ev_01", "feedback": "confirmed", "operator_id": "op;rm -rf", "timestamp": "2026-09-29T12:00:00Z"}, headers=headers)
         assert res.status_code == 422
@@ -310,9 +303,9 @@ class TestDataRetention:
         assert db.query(EventModel).filter(EventModel.event_id == "ev_new_2h").first() is not None
         db.close()
 
-    def test_retention_cleanup_api_endpoint(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_retention_cleanup_api_endpoint(self, admin_client):
+        client = admin_client
+        headers = {}
         res = client.post("/retention/cleanup", json={"max_age_days": 14, "max_events": 2000}, headers=headers)
         assert res.status_code == 200
         data = res.json()
@@ -328,7 +321,7 @@ class TestDataRetention:
 class TestAlertFeedFeatures:
     """Validate query filtering and feedback join."""
 
-    def test_filter_alerts_by_type_and_camera(self):
+    def test_filter_alerts_by_type_and_camera(self, admin_client):
         db = TestingSession()
         db.query(EventModel).delete()
         db.commit()
@@ -339,7 +332,7 @@ class TestAlertFeedFeatures:
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = admin_client
 
         # Filter by camera_id
         r_cam = client.get("/alerts?camera_id=cam_east")
@@ -353,7 +346,7 @@ class TestAlertFeedFeatures:
         assert len(r_type.json()) == 1
         assert r_type.json()[0]["event_type"] == "zone_intrusion"
 
-    def test_alert_response_includes_feedback_state(self):
+    def test_alert_response_includes_feedback_state(self, admin_client):
         db = TestingSession()
         db.query(FeedbackModel).delete()
         db.query(EventModel).delete()
@@ -367,13 +360,13 @@ class TestAlertFeedFeatures:
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = admin_client
         res = client.get("/alerts")
         assert res.status_code == 200
         alerts = res.json()
         assert len(alerts) >= 1
         alert = next(a for a in alerts if a["event_id"] == "ev_fb_test")
-        assert alert["feedback"] == "confirmed"
+        assert (alert["feedback"]["feedback"] if isinstance(alert["feedback"], dict) else alert["feedback"]) == "confirmed"
 
 
 # ===========================================================================
@@ -383,9 +376,9 @@ class TestAlertFeedFeatures:
 class TestZonePolygonPersistence:
     """Confirm /zones returns polygon points so frontend 'Load' button works."""
 
-    def test_zones_endpoint_returns_polygon_coordinates(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_zones_endpoint_returns_polygon_coordinates(self, admin_client):
+        client = admin_client
+        headers = {}
 
         poly = [[100, 150], [300, 150], [300, 400], [100, 400]]
         save_res = client.post("/zones", json={"camera_id": "cam_catalog_test", "zone_id": "zone_box_1", "polygon": poly, "frame_width": 640, "frame_height": 480}, headers=headers)
@@ -411,9 +404,9 @@ class TestZonePolygonPersistence:
 class TestContinuousAllInOneStream:
     """Validate start_stream supports simultaneous 'all' and 'combined' modes."""
 
-    def test_start_stream_supports_all_mode(self):
-        client = TestClient(app)
-        headers = {"X-API-Key": "test-secret-key-123"}
+    def test_start_stream_supports_all_mode(self, admin_client):
+        client = admin_client
+        headers = {}
         res = client.post(
             "/stream/start",
             json={"source": "demo/videos/zone_intrusion_demo.mp4", "mode": "all"},

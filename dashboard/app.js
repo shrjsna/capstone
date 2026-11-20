@@ -126,55 +126,93 @@ document.addEventListener('DOMContentLoaded', () => {
   let isStreaming       = false;
   let streamCameraId    = 'stream_cam_01';
 
-  // Operator & API Key Credentials
-  let operatorId = localStorage.getItem('aegis_operator_id') || 'op_admin';
-  let apiKey     = localStorage.getItem('aegis_api_key') || 'aegis-secret-key-2026';
+  // =========================================================================
+  // RBAC Session Authentication & State
+  // =========================================================================
+  let currentUser = null;
+  let csrfToken   = null;
 
-  if (headerOperatorId) headerOperatorId.textContent = operatorId;
+  // Header Elements
+  const headerUsername    = document.getElementById('header-username');
+  const headerRoleBadge   = document.getElementById('header-role-badge');
+  const btnHeaderLogout   = document.getElementById('btn-header-logout');
 
-  function openAuthModal() {
-    if (!authModal) return;
-    if (settingOperatorId) settingOperatorId.value = operatorId;
-    if (settingApiKey) settingApiKey.value = apiKey;
-    authModal.style.display = 'flex';
+  // Modals
+  const loginModal        = document.getElementById('login-modal');
+  const formLogin         = document.getElementById('form-login');
+  const loginError        = document.getElementById('login-error');
+  const changePwdModal    = document.getElementById('change-pwd-modal');
+  const formChangePwd     = document.getElementById('form-change-pwd');
+  const changePwdError    = document.getElementById('change-pwd-error');
+  const fedConfirmModal   = document.getElementById('fed-confirm-modal');
+  const btnCloseFedModal  = document.getElementById('btn-close-fed-modal');
+  const btnCancelFed      = document.getElementById('btn-cancel-fed');
+  const btnConfirmFed     = document.getElementById('btn-confirm-fed');
+
+  // RBAC Navigation & Panels
+  const tabBtnControl     = document.getElementById('tab-btn-control');
+  const tabBtnUsers       = document.getElementById('tab-btn-users');
+  const tabBtnAudit       = document.getElementById('tab-btn-audit');
+  const panelSimulate     = document.getElementById('panel-simulate-alerts');
+  const btnSegRtsp        = document.getElementById('btn-seg-rtsp');
+
+  function openLoginModal() {
+    if (loginModal) {
+      loginModal.style.display = 'flex';
+      if (loginError) loginError.style.display = 'none';
+    }
   }
 
-  function closeAuthModal() {
-    if (authModal) authModal.style.display = 'none';
+  function closeLoginModal() {
+    if (loginModal) loginModal.style.display = 'none';
   }
 
-  btnOperatorSettings?.addEventListener('click', openAuthModal);
-  btnCloseAuthModal?.addEventListener('click', closeAuthModal);
-  btnCancelAuth?.addEventListener('click', closeAuthModal);
+  function openChangePasswordModal() {
+    if (changePwdModal) {
+      changePwdModal.style.display = 'flex';
+      if (changePwdError) changePwdError.style.display = 'none';
+    }
+  }
 
-  btnSaveAuth?.addEventListener('click', () => {
-    const newOp = (settingOperatorId?.value || '').trim() || 'op_admin';
-    const newKey = (settingApiKey?.value || '').trim() || 'aegis-secret-key-2026';
-    operatorId = newOp;
-    apiKey = newKey;
-    localStorage.setItem('aegis_operator_id', operatorId);
-    localStorage.setItem('aegis_api_key', apiKey);
-    if (headerOperatorId) headerOperatorId.textContent = operatorId;
-    closeAuthModal();
-    showToast(`Saved credentials for '${operatorId}'`, 'info');
-    fetchAlerts();
-  });
+  function closeChangePasswordModal() {
+    if (changePwdModal) changePwdModal.style.display = 'none';
+  }
 
-  // Authenticated fetch wrapper injecting security headers
+  // Central authenticated fetch wrapper injecting CSRF tokens and handling 401/403
   async function authFetch(url, options = {}) {
+    const method = (options.method || 'GET').toUpperCase();
     const headers = options.headers ? { ...options.headers } : {};
-    if (apiKey) {
-      headers['X-API-Key'] = apiKey;
+
+    // Attach CSRF token on state-changing requests
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken;
+      }
     }
-    if (operatorId) {
-      headers['X-Operator-ID'] = operatorId;
-    }
-    const mergedOptions = { ...options, headers };
+
+    const mergedOptions = {
+      ...options,
+      headers,
+      credentials: 'same-origin', // Ensure session cookie is transmitted
+    };
+
     const res = await fetch(url, mergedOptions);
+
     if (res.status === 401) {
-      showToast('Authentication failed: Missing or invalid API key.', 'error');
-      openAuthModal();
+      currentUser = null;
+      window.location.replace('/login.html');
+      throw new Error('Authentication required.');
     }
+
+    if (res.status === 403) {
+      const errData = await res.clone().json().catch(() => ({}));
+      if (errData.code === 'PASSWORD_CHANGE_REQUIRED') {
+        openChangePasswordModal();
+        throw new Error('Password change required.');
+      }
+      showToast(errData.message || 'Access denied: insufficient role privileges.', 'error');
+    }
+
     return res;
   }
 
@@ -183,7 +221,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let capturedImageData = null;
   let canvasCtx        = null;
   let activeZoneType   = 'restricted';  // 'restricted' | 'warning' | 'custom'
-  let activeZoneColor  = '#ef4444';     // Red for danger
+  let activeZoneColor  = '#FF6A00';     // Orange for zone boundary
   let drawMode         = 'box';         // 'box' | 'polygon'
   let isDragging       = false;
   let dragStart        = {x: 0, y: 0};
@@ -238,6 +276,13 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       stopProcessPolling();
     }
+    if (tab === 'users') {
+      fetchUsers();
+      fetchEdgeKeys();
+    }
+    if (tab === 'audit') {
+      fetchAuditLog();
+    }
   }
 
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -269,7 +314,22 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!c) { c = document.createElement('div'); c.id = 'toast-container'; document.body.appendChild(c); }
     const t = document.createElement('div');
     t.className = `toast ${type}`;
-    t.innerHTML = `<span>${type === 'error' ? '⚠️' : 'ℹ️'}</span><span>${msg}</span>`;
+
+    let text = msg;
+    if (Array.isArray(msg)) {
+      text = msg.map(m => (typeof m === 'object' && m ? (m.msg || m.detail || JSON.stringify(m)) : String(m))).join('; ');
+    } else if (typeof msg === 'object' && msg !== null) {
+      const candidate = msg.detail || msg.message;
+      if (Array.isArray(candidate)) {
+        text = candidate.map(m => (typeof m === 'object' && m ? (m.msg || m.detail || JSON.stringify(m)) : String(m))).join('; ');
+      } else if (candidate) {
+        text = candidate;
+      } else {
+        text = JSON.stringify(msg);
+      }
+    }
+
+    t.innerHTML = `<span>${type === 'error' ? '⚠️' : 'ℹ️'}</span><span>${text}</span>`;
     c.appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(12px)'; t.style.transition = 'all 0.3s ease'; setTimeout(() => t.remove(), 300); }, 4000);
   }
@@ -295,6 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Alert feed
   // =========================================================================
   async function fetchAlerts() {
+    if (!currentUser || currentUser.must_change_password) return;
     try {
       const r = await authFetch(`${getApiBase()}/alerts?limit=100`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -303,8 +364,11 @@ document.addEventListener('DOMContentLoaded', () => {
       // Show immediate notification when new alerts arrive
       if (activeAlerts && activeAlerts.length > 0 && data.length > activeAlerts.length) {
         const newest = data[0];
-        const label = (newest.class || newest.class_name || 'Safety violation').replace(/_/g, ' ').toUpperCase();
-        showToast(`🚨 ${label} detected on ${newest.camera_id}!`, 'error');
+        const conf = typeof newest.confidence === 'number' ? newest.confidence : 1.0;
+        if (conf >= 0.60) {
+          const label = (newest.class || newest.class_name || 'Safety violation').replace(/_/g, ' ').toUpperCase();
+          showToast(`🚨 ${label} detected on ${newest.camera_id}! (${Math.round(conf * 100)}% conf)`, 'error');
+        }
       }
       activeAlerts = data;
       setStatus(true);
@@ -336,6 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchThresholds() {
+    if (!currentUser || currentUser.must_change_password) return;
     try {
       const r = await authFetch(`${getApiBase()}/thresholds`);
       if (!r.ok) return;
@@ -344,6 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchPolicyHistory() {
+    if (!currentUser || currentUser.must_change_password) return;
     try {
       const r = await authFetch(`${getApiBase()}/policy-history`);
       if (!r.ok) return;
@@ -353,11 +419,35 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (_) {}
   }
 
+  const btnCheckpointPolicy = document.getElementById('btn-checkpoint-policy');
+  btnCheckpointPolicy?.addEventListener('click', async () => {
+    btnCheckpointPolicy.disabled = true;
+    try {
+      const res = await authFetch(`${getApiBase()}/policy/checkpoint`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        showToast(err, 'error');
+        return;
+      }
+      const data = await res.json();
+      showToast(`Deployed new policy: ${data.policy_version} (Score: ${data.validation_score})!`, 'info');
+      fetchPolicyHistory();
+      fetchModelWeights();
+    } catch (e) {
+      showToast(e.message, 'error');
+    } finally {
+      btnCheckpointPolicy.disabled = false;
+    }
+  });
+
   function renderAlertFeed() {
     if (!isConnected && activeAlerts.length === 0) { renderOffline(); return; }
 
     const now = Date.now();
     const filtered = activeAlerts.filter(a => {
+      // 0. Confidence threshold: alert only if confidence is 60% or above (0.60)
+      if (typeof a.confidence === 'number' && a.confidence < 0.60) return false;
+
       // 1. Event type filter
       if (currentFilter !== 'all' && a.event_type !== currentFilter) return false;
 
@@ -409,8 +499,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const typeLabel = isPpe ? 'PPE Violation' : (alert.event_type === 'zone_intrusion' ? 'Zone Intrusion' : 'Security Alert');
         const typeClass = isPpe ? 'type-ppe' : 'type-intrusion';
         const actionClass = alert.bandit_action === 'escalate' ? 'action-escalate' : 'action-log';
-        // Check persisted feedback from DB or local session cache
-        const fbState = alert.feedback || feedbackMap.get(alert.event_id);
+        // Check persisted feedback from DB or local session cache (handle object {feedback: '...'} or string)
+        const rawFb = (alert.feedback && typeof alert.feedback === 'object') ? alert.feedback.feedback : alert.feedback;
+        const fbState = rawFb || feedbackMap.get(alert.event_id);
         const rawClass = alert.class || alert.class_name || 'unknown';
         const dispClass = String(rawClass).replace(/_/g, ' ').toUpperCase();
 
@@ -462,15 +553,21 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAlertFeed();
   });
 
+  const prevThresholds = {};
   function renderThresholds(data) {
     if (!data || typeof data !== 'object') return;
     thresholds.innerHTML = '';
     for (const [zone, val] of Object.entries(data)) {
       const v = typeof val === 'number' ? val : 0.7;
       const pct = Math.round(v * 100);
+      const changed = prevThresholds[zone] !== undefined && Math.abs(prevThresholds[zone] - v) > 0.001;
+      prevThresholds[zone] = v;
+
+      const borderStyle = changed ? 'border:1px solid var(--accent);box-shadow:0 0 8px rgba(255,106,0,0.3);' : '';
       const el = document.createElement('div');
       el.className = 'threshold-card';
-      el.innerHTML = `<div class="t-head"><span class="t-zone">${zone}</span><span class="t-val">${v.toFixed(2)}</span></div><div class="meter-bar"><div class="meter-fill" style="width:${pct}%;"></div></div>`;
+      if (borderStyle) el.style.cssText = borderStyle;
+      el.innerHTML = `<div class="t-head"><span class="t-zone" style="font-weight:600;">${zone}</span><span class="t-val" style="color:var(--accent);font-family:monospace;font-weight:700;">${v.toFixed(2)}</span></div><div class="meter-bar"><div class="meter-fill" style="width:${pct}%;"></div></div>`;
       thresholds.appendChild(el);
     }
   }
@@ -482,7 +579,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const el = document.createElement('div');
       el.className = 'history-item';
       const ts = item.trained_at ? new Date(item.trained_at).toLocaleDateString() : 'N/A';
-      el.innerHTML = `<div><strong style="color:var(--accent-cyan);">${item.policy_version || '—'}</strong><span style="color:var(--text-dim);margin-left:6px;">${ts}</span></div><div style="font-weight:600;color:var(--color-confirm);">Score: ${item.validation_score ?? 'N/A'}</div>`;
+      el.innerHTML = `<div><strong style="color:var(--accent);">${item.policy_version || '—'}</strong><span style="color:var(--text-dim);margin-left:6px;">${ts}</span></div><div style="font-weight:600;color:var(--color-confirm);">Score: ${item.validation_score ?? 'N/A'}</div>`;
       policyHistory.appendChild(el);
     });
   }
@@ -494,19 +591,22 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       feedbackMap.set(eventId, fbType);
       renderAlertFeed();
+      const opId = currentUser?.username || 'operator';
       const r = await authFetch(`${getApiBase()}/feedback`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           event_id: eventId,
           feedback: fbType,
-          operator_id: operatorId,
+          operator_id: opId,
           timestamp: new Date().toISOString()
         })
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      showToast(`Feedback '${fbType}' recorded by ${operatorId}`, 'info');
+      showToast(`Feedback '${fbType}' recorded by ${opId}`, 'info');
       fetchThresholds();
+      fetchModelWeights();
+      fetchAlerts();
     } catch (e) {
       showToast(`Feedback failed: ${e.message}`, 'error');
       feedbackMap.delete(eventId);
@@ -625,7 +725,7 @@ document.addEventListener('DOMContentLoaded', () => {
       zone_id: zoneIdInput.value.trim() || 'zone_A',
       zone_config_path: zoneConfigPath,
       debounce_frames: parseInt(debounceInput.value) || 3,
-      conf_threshold: parseFloat(confInput.value) || 0.25,
+      conf_threshold: parseFloat(confInput.value) || 0.60,
     };
 
     btnStreamStart.disabled = true;
@@ -758,7 +858,7 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.zone-type-pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
       activeZoneType = pill.getAttribute('data-type') || 'restricted';
-      activeZoneColor = pill.getAttribute('data-color') || '#ef4444';
+      activeZoneColor = pill.getAttribute('data-color') || '#FF6A00';
       const presetId = pill.getAttribute('data-zoneid');
       if (presetId) {
         zoneZoneId.value = presetId;
@@ -991,7 +1091,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Draw background video frame
     ctx.drawImage(zoneCanvas._imgElement, 0, 0, zoneCanvas.width, zoneCanvas.height);
 
-    const mainColor = activeZoneColor || '#ef4444';
+    const mainColor = activeZoneColor || '#FF6A00';
 
     // 1. Draw Dragging Box Preview
     if (isDragging && drawMode === 'box') {
@@ -1000,7 +1100,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const w = Math.abs(dragCurrent.x - dragStart.x);
       const h = Math.abs(dragCurrent.y - dragStart.y);
 
-      ctx.fillStyle = activeZoneType === 'restricted' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(251, 191, 36, 0.25)';
+      ctx.fillStyle = 'rgba(255, 106, 0, 0.25)';
       ctx.fillRect(x1, y1, w, h);
 
       ctx.strokeStyle = mainColor;
@@ -1024,7 +1124,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.moveTo(zonePoints[0].x, zonePoints[0].y);
       zonePoints.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
       ctx.closePath();
-      ctx.fillStyle = activeZoneType === 'restricted' ? 'rgba(239, 68, 68, 0.22)' : 'rgba(251, 191, 36, 0.22)';
+      ctx.fillStyle = 'rgba(255, 106, 0, 0.22)';
       ctx.fill();
     }
 
@@ -1060,7 +1160,7 @@ document.addEventListener('DOMContentLoaded', () => {
     zonePoints.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-      ctx.fillStyle = i === 0 ? '#10b981' : mainColor;
+      ctx.fillStyle = i === 0 ? '#FFFFFF' : mainColor;
       ctx.fill();
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
@@ -1211,6 +1311,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Saved zones list loader
   async function loadZonesList() {
+    if (!currentUser || currentUser.must_change_password) return;
     try {
       const r = await authFetch(`${getApiBase()}/zones`);
       if (!r.ok) { zonesList.innerHTML = '<p style="font-size:12px;color:var(--text-dim);">Could not load zones.</p>'; return; }
@@ -1423,6 +1524,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function loadProcessStatus() {
+    if (!currentUser || currentUser.must_change_password || currentUser.role !== 'admin') return;
     try {
       const res = await authFetch(`${getApiBase()}/processes`);
       if (!res.ok) return;
@@ -1478,51 +1580,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function startProcess(name, sourceVal) {
+    const btn = document.querySelector(`.btn-proc-start[data-proc="${name}"]`);
+    if (btn) btn.disabled = true;
+
+    let bodyData = null;
+    if (name === 'zone_pipeline') {
+      const srcInput = document.getElementById('zone-proc-source');
+      const s = sourceVal || (srcInput ? srcInput.value.trim() : 'demo/videos/zone_intrusion_demo.mp4');
+      bodyData = JSON.stringify({ source: s });
+    }
+
+    try {
+      const res = await authFetch(`${getApiBase()}/processes/${name}/start`, {
+        method: 'POST',
+        headers: bodyData ? { 'Content-Type': 'application/json' } : {},
+        body: bodyData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        showToast(`Start failed: ${err.detail || res.statusText}`, 'error');
+        if (btn) btn.disabled = false;
+        return;
+      }
+
+      const data = await res.json();
+      updateProcessCardUI(data);
+
+      // Auto-open logs panel and fetch immediately so operator sees real-time progress
+      openLogsMap.add(name);
+      const logBody = document.getElementById(`proc-logs-body-${name}`);
+      const chevron = document.getElementById(`chevron-${name}`);
+      if (logBody) logBody.classList.add('open');
+      if (chevron) chevron.classList.add('rotated');
+
+      showToast(`Process ${name} launched`, 'info');
+      fetchProcessLogs(name);
+      loadProcessStatus();
+    } catch (e) {
+      showToast(`Error starting process: ${e.message}`, 'error');
+      if (btn) btn.disabled = false;
+    }
+  }
+
   // Bind Start buttons
   document.querySelectorAll('.btn-proc-start').forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const name = btn.getAttribute('data-proc');
       if (!name) return;
-
-      btn.disabled = true;
-      let bodyData = null;
-
-      if (name === 'zone_pipeline') {
-        const srcInput = document.getElementById('zone-proc-source');
-        const sourceVal = srcInput ? srcInput.value.trim() : 'demo/videos/zone_intrusion_demo.mp4';
-        bodyData = JSON.stringify({ source: sourceVal });
+      if (name === 'federated_demo') {
+        if (fedConfirmModal) fedConfirmModal.style.display = 'flex';
+        return;
       }
-
-      try {
-        const res = await authFetch(`${getApiBase()}/processes/${name}/start`, {
-          method: 'POST',
-          headers: bodyData ? { 'Content-Type': 'application/json' } : {},
-          body: bodyData,
-        });
-
-        if (!res.ok) {
-          const err = await res.json();
-          showToast(`Start failed: ${err.detail || res.statusText}`, 'error');
-          btn.disabled = false;
-          return;
-        }
-
-        const data = await res.json();
-        updateProcessCardUI(data);
-
-        // Auto-open logs panel so operator sees immediate progress
-        openLogsMap.add(name);
-        const logBody = document.getElementById(`proc-logs-body-${name}`);
-        const chevron = document.getElementById(`chevron-${name}`);
-        if (logBody) logBody.classList.add('open');
-        if (chevron) chevron.classList.add('rotated');
-
-        showToast(`Process ${name} launched`, 'info');
-        loadProcessStatus();
-      } catch (e) {
-        showToast(`Error starting process: ${e.message}`, 'error');
-        btn.disabled = false;
-      }
+      startProcess(name);
     });
   });
 
@@ -1652,15 +1763,519 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Initial process status check
-  loadProcessStatus();
+  // =========================================================================
+  // Polling loop (active while user is authenticated)
+  // =========================================================================
+  setInterval(() => {
+    if (currentUser && !currentUser.must_change_password) {
+      fetchAlerts();
+      fetchThresholds();
+      fetchModelWeights();
+    }
+  }, 2000);
 
   // =========================================================================
-  // Polling loop
+  // RBAC Role Visibility & Interface Control
   // =========================================================================
-  fetchAlerts();
-  fetchThresholds();
-  fetchPolicyHistory();
-  setInterval(() => { fetchAlerts(); fetchThresholds(); }, 2000);
+  function applyRoleVisibility(role) {
+    const isAdmin = role === 'admin';
+    if (headerRoleBadge) {
+      headerRoleBadge.textContent = role.toUpperCase();
+      headerRoleBadge.className = 'role-badge ' + (isAdmin ? 'admin' : 'operator');
+    }
+    if (headerUsername) {
+      headerUsername.textContent = currentUser?.username || 'Operator';
+    }
+
+    // Tab buttons
+    if (tabBtnControl) tabBtnControl.style.display = isAdmin ? 'flex' : 'none';
+    if (tabBtnUsers)   tabBtnUsers.style.display   = isAdmin ? 'flex' : 'none';
+    if (tabBtnAudit)   tabBtnAudit.style.display   = isAdmin ? 'flex' : 'none';
+
+    // Operator restrictions
+    if (panelSimulate) panelSimulate.style.display = isAdmin ? 'block' : 'none';
+    if (btnSegRtsp)    btnSegRtsp.style.display    = isAdmin ? 'flex' : 'none';
+  }
+
+  // =========================================================================
+  // Authentication Handlers (Login, Logout, Password Change)
+  // =========================================================================
+  formLogin?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('login-username')?.value.trim();
+    const password = document.getElementById('login-password')?.value;
+
+    try {
+      const res = await fetch(`${getApiBase()}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ username, password }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: { message: res.statusText } }));
+        const msg = (err.detail && err.detail.message) || err.detail || 'Login failed.';
+        if (loginError) {
+          loginError.textContent = msg;
+          loginError.style.display = 'block';
+        }
+        return;
+      }
+
+      const data = await res.json();
+      currentUser = data.user;
+      csrfToken   = data.csrf_token;
+      closeLoginModal();
+
+      if (currentUser.must_change_password) {
+        openChangePasswordModal();
+      } else {
+        applyRoleVisibility(currentUser.role);
+        showToast(`Welcome back, ${currentUser.username}!`, 'success');
+        startDataPolling();
+      }
+    } catch (err) {
+      if (loginError) {
+        loginError.textContent = err.message || 'Connection to server failed.';
+        loginError.style.display = 'block';
+      }
+    }
+  });
+
+  formChangePwd?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const oldPassword = document.getElementById('change-pwd-old')?.value;
+    const newPassword = document.getElementById('change-pwd-new')?.value;
+    const confirmPwd  = document.getElementById('change-pwd-confirm')?.value;
+
+    if (newPassword !== confirmPwd) {
+      if (changePwdError) {
+        changePwdError.textContent = 'New passwords do not match.';
+        changePwdError.style.display = 'block';
+      }
+      return;
+    }
+
+    try {
+      const res = await authFetch(`${getApiBase()}/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        if (changePwdError) {
+          changePwdError.textContent = err.detail || 'Password update failed.';
+          changePwdError.style.display = 'block';
+        }
+        return;
+      }
+
+      closeChangePasswordModal();
+      showToast('Password updated successfully.', 'success');
+      applyRoleVisibility(currentUser.role);
+      startDataPolling();
+    } catch (err) {
+      if (changePwdError) {
+        changePwdError.textContent = err.message || 'Error updating password.';
+        changePwdError.style.display = 'block';
+      }
+    }
+  });
+
+  btnHeaderLogout?.addEventListener('click', async () => {
+    try {
+      await authFetch(`${getApiBase()}/auth/logout`, { method: 'POST' });
+    } catch (e) {
+      // Ignore logout errors
+    }
+    currentUser = null;
+    csrfToken   = null;
+    window.location.replace('/login.html');
+  });
+
+  // =========================================================================
+  // Users & Edge Keys Administration Tab
+  // =========================================================================
+  const tbodyUsers     = document.getElementById('tbody-users');
+  const usersCountBadge= document.getElementById('users-count-badge');
+  const btnRefreshUsers= document.getElementById('btn-refresh-users');
+  const formCreateUser = document.getElementById('form-create-user');
+
+  const tbodyEdgeKeys  = document.getElementById('tbody-edge-keys');
+  const keysCountBadge = document.getElementById('keys-count-badge');
+  const btnRefreshKeys = document.getElementById('btn-refresh-keys');
+  const formCreateKey  = document.getElementById('form-create-key');
+  const issuedKeyBanner= document.getElementById('issued-key-banner');
+  const issuedKeyVal   = document.getElementById('issued-key-val');
+  const btnCopyIssued  = document.getElementById('btn-copy-issued-key');
+
+  async function fetchUsers() {
+    if (!tbodyUsers) return;
+    try {
+      const res = await authFetch(`${getApiBase()}/admin/users`);
+      if (!res.ok) return;
+      const users = await res.json();
+      if (usersCountBadge) usersCountBadge.textContent = `${users.length} Users`;
+      tbodyUsers.innerHTML = '';
+      users.forEach(u => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${u.id}</td>
+          <td><strong>${u.username}</strong></td>
+          <td><span class="role-badge ${u.role}">${u.role.toUpperCase()}</span></td>
+          <td>${u.active ? '<span style="color:var(--text);">ACTIVE</span>' : '<span style="color:var(--text-muted);">DISABLED</span>'}</td>
+          <td>${u.must_change_password ? '<span style="color:var(--accent);">REQUIRED</span>' : '<span style="color:var(--text-muted);">OK</span>'}</td>
+          <td>${new Date(u.created_at).toLocaleDateString()}</td>
+          <td>
+            <button class="btn-table-action" onclick="window.toggleUserActive(${u.id}, ${!u.active})">${u.active ? 'Disable' : 'Enable'}</button>
+            <button class="btn-table-action" onclick="window.resetUserPassword(${u.id})">Reset Pwd</button>
+          </td>
+        `;
+        tbodyUsers.appendChild(tr);
+      });
+    } catch (e) {
+      tbodyUsers.innerHTML = `<tr><td colspan="7" style="color:var(--accent);text-align:center;">Failed to load users: ${e.message}</td></tr>`;
+    }
+  }
+
+  window.toggleUserActive = async function(userId, targetActive) {
+    try {
+      const res = await authFetch(`${getApiBase()}/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: targetActive }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        showToast(err.detail || 'Could not update user.', 'error');
+        return;
+      }
+      showToast(`User status updated.`, 'success');
+      fetchUsers();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  window.resetUserPassword = async function(userId) {
+    const tempPass = prompt('Enter new temporary password (min 12 chars with upper, lower, num, symbol):');
+    if (!tempPass) return;
+    try {
+      const res = await authFetch(`${getApiBase()}/admin/users/${userId}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ temp_password: tempPass }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        showToast(err.detail || 'Reset failed.', 'error');
+        return;
+      }
+      showToast('Password reset. User must change on next login.', 'success');
+      fetchUsers();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  formCreateUser?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = document.getElementById('new-user-username')?.value.trim();
+    const role = document.getElementById('new-user-role')?.value;
+    const tempPassword = document.getElementById('new-user-password')?.value;
+
+    try {
+      const res = await authFetch(`${getApiBase()}/admin/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, role, temp_password: tempPassword }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        showToast(err, 'error');
+        return;
+      }
+      showToast(`Created user account '${username}'.`, 'success');
+      formCreateUser.reset();
+      fetchUsers();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+
+  async function fetchEdgeKeys() {
+    if (!tbodyEdgeKeys) return;
+    try {
+      const res = await authFetch(`${getApiBase()}/admin/edge-keys`);
+      if (!res.ok) return;
+      const keys = await res.json();
+      if (keysCountBadge) keysCountBadge.textContent = `${keys.length} Keys`;
+      tbodyEdgeKeys.innerHTML = '';
+      keys.forEach(k => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><code>${k.key_prefix}</code></td>
+          <td><strong>${k.label}</strong></td>
+          <td>${new Date(k.created_at).toLocaleDateString()}</td>
+          <td>${k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : 'Never'}</td>
+          <td>${k.active ? '<span style="color:var(--text);">ACTIVE</span>' : '<span style="color:var(--text-muted);">REVOKED</span>'}</td>
+          <td>
+            ${k.active ? `<button class="btn-table-action danger" onclick="window.revokeEdgeKey('${k.key_prefix}')">Revoke</button>` : '—'}
+          </td>
+        `;
+        tbodyEdgeKeys.appendChild(tr);
+      });
+    } catch (e) {
+      tbodyEdgeKeys.innerHTML = `<tr><td colspan="6" style="color:var(--accent);text-align:center;">Failed to load edge keys: ${e.message}</td></tr>`;
+    }
+  }
+
+  window.revokeEdgeKey = async function(prefix) {
+    if (!confirm(`Revoke edge key with prefix '${prefix}' immediately?`)) return;
+    try {
+      const res = await authFetch(`${getApiBase()}/admin/edge-keys/${prefix}/revoke`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        showToast(err.detail || 'Revocation failed.', 'error');
+        return;
+      }
+      showToast('Edge key revoked.', 'info');
+      fetchEdgeKeys();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  formCreateKey?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const label = document.getElementById('new-key-label')?.value.trim();
+    try {
+      const res = await authFetch(`${getApiBase()}/admin/edge-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        showToast(err, 'error');
+        return;
+      }
+      const data = await res.json();
+      showToast(`Issued edge key for '${label}'.`, 'success');
+      if (issuedKeyBanner && issuedKeyVal) {
+        issuedKeyVal.textContent = data.api_key;
+        issuedKeyBanner.style.display = 'block';
+      }
+      formCreateKey.reset();
+      fetchEdgeKeys();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  });
+
+  btnCopyIssued?.addEventListener('click', () => {
+    if (issuedKeyVal && issuedKeyVal.textContent) {
+      navigator.clipboard.writeText(issuedKeyVal.textContent);
+      showToast('Key copied to clipboard.', 'success');
+    }
+  });
+
+  btnRefreshUsers?.addEventListener('click', fetchUsers);
+  btnRefreshKeys?.addEventListener('click', fetchEdgeKeys);
+
+  // =========================================================================
+  // Audit Trail Tab
+  // =========================================================================
+  const tbodyAudit        = document.getElementById('tbody-audit');
+  const auditCountBadge   = document.getElementById('audit-count-badge');
+  const auditActionFilter = document.getElementById('audit-action-filter');
+  const btnRefreshAudit   = document.getElementById('btn-refresh-audit');
+  const btnAuditPrev      = document.getElementById('btn-audit-prev');
+  const btnAuditNext      = document.getElementById('btn-audit-next');
+  const auditPagination   = document.getElementById('audit-pagination-info');
+
+  let auditOffset = 0;
+  const auditLimit = 25;
+
+  async function fetchAuditLog() {
+    if (!tbodyAudit) return;
+    try {
+      const actionParam = auditActionFilter?.value ? `&action=${encodeURIComponent(auditActionFilter.value)}` : '';
+      const res = await authFetch(`${getApiBase()}/admin/audit-log?limit=${auditLimit}&offset=${auditOffset}${actionParam}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (auditCountBadge) auditCountBadge.textContent = `${data.total} Entries`;
+      if (auditPagination) {
+        auditPagination.textContent = `Showing ${auditOffset + 1}-${Math.min(auditOffset + data.items.length, data.total)} of ${data.total}`;
+      }
+      tbodyAudit.innerHTML = '';
+      data.items.forEach(a => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${a.id}</td>
+          <td><small style="color:var(--text-muted);">${new Date(a.ts).toISOString().replace('T', ' ').slice(0, 19)}</small></td>
+          <td><strong>${a.actor || '—'}</strong></td>
+          <td><span class="role-badge ${a.role || 'operator'}">${a.role ? a.role.toUpperCase() : 'ANON'}</span></td>
+          <td><code>${a.action}</code></td>
+          <td><small>${a.target || '—'}</small></td>
+          <td>${a.outcome === 'success' ? '<span style="color:var(--text);">OK</span>' : '<span style="color:var(--accent);">DENIED</span>'}</td>
+          <td><small style="font-family:monospace;">${a.client_addr || '—'}</small></td>
+          <td><small style="color:var(--text-muted);">${a.detail || ''}</small></td>
+        `;
+        tbodyAudit.appendChild(tr);
+      });
+    } catch (e) {
+      tbodyAudit.innerHTML = `<tr><td colspan="9" style="color:var(--accent);text-align:center;">Failed to load audit trail: ${e.message}</td></tr>`;
+    }
+  }
+
+  btnRefreshAudit?.addEventListener('click', fetchAuditLog);
+  auditActionFilter?.addEventListener('change', () => { auditOffset = 0; fetchAuditLog(); });
+  btnAuditPrev?.addEventListener('click', () => {
+    if (auditOffset >= auditLimit) {
+      auditOffset -= auditLimit;
+      fetchAuditLog();
+    }
+  });
+  btnAuditNext?.addEventListener('click', () => {
+    auditOffset += auditLimit;
+    fetchAuditLog();
+  });
+
+  // Tab switching extension for Users & Audit
+  const allTabBtns = document.querySelectorAll('.tab-btn');
+  allTabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabName = btn.getAttribute('data-tab');
+      if (tabName === 'users') {
+        fetchUsers();
+        fetchEdgeKeys();
+      } else if (tabName === 'audit') {
+        fetchAuditLog();
+      }
+    });
+  });
+
+  // =========================================================================
+  // Federated Confirmation Modal Handlers
+  // =========================================================================
+  btnCloseFedModal?.addEventListener('click', () => {
+    if (fedConfirmModal) fedConfirmModal.style.display = 'none';
+  });
+  btnCancelFed?.addEventListener('click', () => {
+    if (fedConfirmModal) fedConfirmModal.style.display = 'none';
+  });
+  btnConfirmFed?.addEventListener('click', () => {
+    if (fedConfirmModal) fedConfirmModal.style.display = 'none';
+    startProcess('federated_demo');
+  });
+
+  // =========================================================================
+  // Startup Auth Verification
+  // =========================================================================
+  // =========================================================================
+  // Live Model Weights Visualization
+  // =========================================================================
+  const modelWeightsContainer = document.getElementById('model-weights-container');
+  let prevWeightsNorm = null;
+
+  async function fetchModelWeights() {
+    if (!currentUser || currentUser.must_change_password) return;
+    try {
+      const r = await authFetch(`${getApiBase()}/model-weights`);
+      if (!r.ok) return;
+      const data = await r.json();
+      renderModelWeights(data);
+    } catch (_) {}
+  }
+
+  let prevUpdateCount = null;
+  function renderModelWeights(data) {
+    if (!modelWeightsContainer || !data || !data.actions) return;
+    const esc = data.actions.escalate;
+    const log = data.actions.log_only;
+    if (!esc) return;
+
+    const currentCount = data.update_count || 0;
+    const normChanged = (prevWeightsNorm !== null && Math.abs(prevWeightsNorm - esc.norm) > 0.0001) ||
+                        (prevUpdateCount !== null && currentCount !== prevUpdateCount);
+    prevWeightsNorm = esc.norm;
+    prevUpdateCount = currentCount;
+
+    const borderStyle = normChanged ? 'border:1px solid var(--accent);box-shadow:0 0 10px rgba(255,106,0,0.3);' : '';
+    const updateBadge = currentCount > 0
+      ? `<span style="font-size:10px;background:#1E1E1E;color:var(--accent);border:1px solid var(--accent);padding:1px 6px;border-radius:3px;font-family:monospace;font-weight:600;">UPDATES: ${currentCount}</span>`
+      : `<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">BASELINE</span>`;
+
+    modelWeightsContainer.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-size:11px;color:var(--text-muted);font-family:monospace;">POLICY: ${data.policy_version || 'policy_v1'}</span>
+        ${updateBadge}
+      </div>
+      <div class="threshold-card" style="${borderStyle}">
+        <div class="t-head">
+          <span class="t-zone" style="font-weight:600;color:var(--text);">ESCALATE ARM (||θ||) <span style="font-size:10px;color:var(--accent);">● LIVE FEED</span></span>
+          <span class="t-val" style="color:var(--accent);font-family:monospace;font-size:13px;font-weight:700;">${esc.norm.toFixed(4)}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;color:var(--text-muted);margin-top:6px;">
+          <div>Conf: <strong style="color:var(--text);font-family:monospace;">${esc.confidence_weight > 0 ? '+' : ''}${esc.confidence_weight.toFixed(4)}</strong></div>
+          <div>Diff: <strong style="color:var(--text);font-family:monospace;">${esc.threshold_diff_weight > 0 ? '+' : ''}${esc.threshold_diff_weight.toFixed(4)}</strong></div>
+          <div>Frames: <strong style="color:var(--text);font-family:monospace;">${esc.frame_persistence_weight > 0 ? '+' : ''}${esc.frame_persistence_weight.toFixed(4)}</strong></div>
+          <div>Bias: <strong style="color:var(--text);font-family:monospace;">${esc.decision_bias > 0 ? '+' : ''}${esc.decision_bias.toFixed(4)}</strong></div>
+        </div>
+      </div>
+      <div class="threshold-card" style="margin-top:8px;">
+        <div class="t-head">
+          <span class="t-zone" style="font-weight:600;color:var(--text-muted);">LOG-ONLY ARM (||θ||) <span style="font-size:10px;color:var(--text-muted);">○ SUPPRESSED</span></span>
+          <span class="t-val" style="color:var(--text-muted);font-family:monospace;font-size:13px;">${log ? log.norm.toFixed(4) : '—'}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;color:var(--text-muted);margin-top:6px;">
+          <div>Conf: <strong style="color:var(--text);font-family:monospace;">${log ? (log.confidence_weight > 0 ? '+' : '') + log.confidence_weight.toFixed(4) : '—'}</strong></div>
+          <div>Bias: <strong style="color:var(--text);font-family:monospace;">${log ? (log.decision_bias > 0 ? '+' : '') + log.decision_bias.toFixed(4) : '—'}</strong></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function startDataPolling() {
+    fetchAlerts();
+    fetchThresholds();
+    fetchPolicyHistory();
+    fetchModelWeights();
+    if (currentUser?.role === 'admin') {
+      loadProcessStatus();
+    }
+  }
+
+  async function checkInitialAuth() {
+    let resOk = false;
+    try {
+      const res = await fetch(`${getApiBase()}/auth/me`, { credentials: 'same-origin' });
+      resOk = res.ok;
+      if (res.ok) {
+        const data = await res.json();
+        currentUser = data.user || data;
+        csrfToken   = data.csrf_token;
+        if (currentUser && currentUser.must_change_password) {
+          openChangePasswordModal();
+        } else if (currentUser) {
+          applyRoleVisibility(currentUser.role);
+          startDataPolling();
+        }
+      } else {
+        window.location.replace('/login.html');
+      }
+    } catch (e) {
+      console.error('Initial auth verification exception:', e);
+      if (!resOk) {
+        window.location.replace('/login.html');
+      }
+    }
+  }
+
+  checkInitialAuth();
+
 });
-

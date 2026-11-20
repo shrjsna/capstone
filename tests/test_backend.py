@@ -63,13 +63,13 @@ def run_around_tests():
 client = TestClient(app)
 
 
-def test_health_check():
+def test_health_check(client):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
-def test_post_event_success():
+def test_post_event_success(client):
     payload = {
         "camera_id": "cam_01",
         "zone_id": "zone_a",
@@ -93,7 +93,7 @@ def test_post_event_success():
     assert data["bandit_action"] in ["escalate", "log_only"]
 
 
-def test_post_event_malformed_rejected():
+def test_post_event_malformed_rejected(client):
     # Missing camera_id and confidence
     malformed_payload = {
         "zone_id": "zone_a",
@@ -104,7 +104,7 @@ def test_post_event_malformed_rejected():
     assert response.status_code == 422
 
 
-def test_post_feedback_success():
+def test_post_feedback_success(client):
     # First create an event
     event_payload = {
         "camera_id": "cam_02",
@@ -133,7 +133,7 @@ def test_post_feedback_success():
     assert fb_resp.json()["event_id"] == event_id
 
 
-def test_post_feedback_nonexistent_event_rejected():
+def test_post_feedback_nonexistent_event_rejected(client):
     fake_feedback = {
         "event_id": "00000000-0000-0000-0000-000000000000",
         "feedback": "false_alarm",
@@ -145,7 +145,7 @@ def test_post_feedback_nonexistent_event_rejected():
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_get_alerts_list():
+def test_get_alerts_list(client):
     # Post 2 events
     for i in range(2):
         client.post("/events", json={
@@ -166,7 +166,7 @@ def test_get_alerts_list():
     assert len(alerts) == 2
 
 
-def test_get_alert_detail():
+def test_get_alert_detail(client):
     event_resp = client.post("/events", json={
         "camera_id": "cam_detail",
         "zone_id": "zone_a",
@@ -186,7 +186,7 @@ def test_get_alert_detail():
     assert detail_resp.json()["camera_id"] == "cam_detail"
 
 
-def test_get_policy_history():
+def test_get_policy_history(client):
     response = client.get("/policy-history")
     assert response.status_code == 200
     assert isinstance(response.json(), list)

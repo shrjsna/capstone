@@ -1,0 +1,92 @@
+{
+  "blocked_elements": [],
+  "tests": {
+    "hero_and_tags": {
+      "hasHero": true,
+      "hasTunnel": true,
+      "rectanglesCount": 22,
+      "radialSpokesCount": 12,
+      "tagsCount": 0,
+      "tagsList": []
+    },
+    "live_stream": {
+      "hasWebcam": false,
+      "hasFile": false,
+      "hasCctv": false,
+      "hasModeAll": false,
+      "hasActionBtn": false
+    },
+    "draw_zone": {
+      "hasCanvas": true,
+      "canvasW": 300,
+      "canvasH": 150,
+      "hasPresetEntry": false,
+      "hasUndo": true,
+      "hasClear": true,
+      "hasSave": true,
+      "hasDetectAnyone": false
+    },
+    "process_orchestration": {
+      "hasFedCard": false,
+      "hasZoneCard": false,
+      "hasPruneBtn": false,
+      "pruneBtnVisible": false,
+      "modalOpen": false,
+      "modalClosed": true
+    },
+    "users_and_keys": {
+      "gridTemplateColumns": "802.4px 340px",
+      "titleBandGridColumn": "1 / -1",
+      "asideDisplay": "block",
+      "asideVisible": true,
+      "hasFormUser": true,
+      "hasUsernameInp": true,
+      "hasRoleSel": true,
+      "hasPasswordInp": true,
+      "hasSubmitUserBtn": true,
+      "hasFormKey": true,
+      "hasKeyLabelInp": true,
+      "hasSubmitKeyBtn": true,
+      "hasUsersTable": true,
+      "hasKeysTable": true
+    },
+    "users_layout_collapse": {
+      "gridTemplateColumns": "943.2px",
+      "asideTop": 4394.89990234375,
+      "tableTop": 3966.5,
+      "isAsidePushedBelowTable": true
+    },
+    "audit_log": {
+      "hasTable": true,
+      "hasFilter": true,
+      "filterOptionsCount": 9,
+      "hasPrev": true,
+      "hasNext": true,
+      "hasTitleBand": true
+    },
+    "role_visibility": {
+      "adminState": {
+        "tabUsersDisplay": "flex",
+        "tabAuditDisplay": "flex",
+        "tabControlDisplay": "flex",
+        "simPanelDisplay": "block",
+        "btnRtspDisplay": null
+      },
+      "operatorState": {
+        "tabUsersDisplay": "none",
+        "tabAuditDisplay": "none",
+        "tabControlDisplay": "none",
+        "simPanelDisplay": "none",
+        "btnRtspDisplay": null
+      }
+    },
+    "fonts_and_offline": {
+      "googleFontLinksCountInIndex": 0,
+      "titleTextFont": "Unbounded, \"Arial Black\", Impact, sans-serif",
+      "h2FontFamily": "Unbounded, \"Arial Black\", Impact, sans-serif",
+      "bodyFontFamily": "Inter, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif"
+    },
+    "external_requests": []
+  },
+  "failures": []
+}

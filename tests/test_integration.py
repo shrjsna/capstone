@@ -85,8 +85,8 @@ def integration_db():
 
 
 @pytest.fixture()
-def client():
-    return TestClient(app)
+def client(admin_client):
+    return admin_client
 
 
 # ---------------------------------------------------------------------------

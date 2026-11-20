@@ -83,30 +83,100 @@ This will:
 
 While AEGIS was initially prototyped for single-machine demonstration, this production-readiness pass hardens the server for unattended, 24/7 network operation on an industrial LAN.
 
-### 1. Configuration & Security Credentials
+### 1. Configuration & Environment Tunables
 Configuration is loaded from environment variables or a local `.env` file (copied from `.env.example`):
 
 ```bash
 cp .env.example .env
 ```
 
-Key environment variables:
+Key environment tunables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `AEGIS_HOST` | `0.0.0.0` | Bind address (`127.0.0.1` for local-only, `0.0.0.0` for LAN access) |
-| `AEGIS_PORT` | `8000` | Port for unified backend API and dashboard |
-| `AEGIS_API_KEY` | `aegis-secret-key-2026` | **Mandatory shared secret** required on all state-mutating endpoints |
-| `AEGIS_AUTH_REQUIRED` | `true` | When `true`, enforces API key checks on mutating routes |
-| `AEGIS_CORS_ORIGINS` | `http://localhost:8000,...` | Comma-delimited list of permitted CORS origins (no wildcards by default) |
-| `AEGIS_RETENTION_DAYS` | `7` | Maximum age (days) for local `.mp4`/`.avi` incident clips before auto-pruning |
+| `AEGIS_PORT` | `8000` | Port for unified backend API and operations dashboard |
+| `AEGIS_AUTH_ENABLED` | `true` | Enforces central default-deny RBAC on every route |
+| `AEGIS_COOKIE_SECURE` | `false` | Set `true` in production when fronted by a TLS reverse proxy |
+| `AEGIS_SESSION_IDLE_MINUTES` | `30` | Inactivity window before session expiration |
+| `AEGIS_SESSION_ABSOLUTE_HOURS`| `12` | Hard maximum session duration |
+| `AEGIS_LOGIN_MAX_FAILURES` | `5` | Failed login limit triggering 15-minute account throttle |
+| `AEGIS_LOGIN_LOCKOUT_MINUTES`| `15` | Duration of login attempt lockout window |
+| `AEGIS_MIN_PASSWORD_LENGTH` | `12` | Minimum character length for human passwords |
+| `AEGIS_TRUSTED_PROXIES` | `127.0.0.1,::1` | Proxies permitted to populate `X-Forwarded-For` client IP |
+| `AEGIS_CORS_ORIGINS` | `http://localhost:8000,...` | Allowed CORS origins (strict matching, no wildcards with credentials) |
+| `AEGIS_RETENTION_DAYS` | `7` | Maximum age (days) for local incident clips before auto-pruning |
 | `AEGIS_RETENTION_MAX_EVENTS` | `5000` | SQLite event limit before FIFO truncation |
-| `AEGIS_MAX_MJPEG_CLIENTS` | `10` | Concurrency ceiling for simultaneous live stream viewers |
 
-### 2. Authentication & Provenance Model
-- **Protected Endpoints:** All state-changing routes (`POST /events`, `POST /feedback`, `POST /zones`, `DELETE /zones/{cam}/{zone}`, `POST /stream/start`, `POST /stream/stop`, `POST /processes/{name}/start`, `POST /processes/{name}/stop`, `POST /retention/cleanup`) require the API key.
-- **Header Delivery:** Send `X-API-Key: <your-key>` (or `Authorization: Bearer <your-key>`).
-- **Dashboard Integration:** Click the operator badge (`👤 op_admin 🔒`) in the top-right header to configure your operator call-sign and API key. Stored locally in browser `localStorage`.
-- **Operator Provenance:** Human feedback (`POST /feedback`) records both the verified session key and the operator identifier (`X-Operator-ID` or payload `operator_id`) to maintain an accountable audit trail.
+### 2. Roles and Access Control (RBAC)
+
+AEGIS enforces strict server-side Role-Based Access Control backed by a unified default-deny permission table:
+
+#### Role Matrix
+| Role | Identity Type | Purpose & Scope |
+|---|---|---|
+| `admin` | Human (User account) | Full access. User management, edge key issuance/revocation, process supervisor (federated demo, zone pipeline), zone configuration, retention cleanup, live stream controls (all sources), and audit trail review. |
+| `operator` | Human (User account) | Daily safety operations. View alerts and alert details, submit feedback (confirms/false alarms), review thresholds and policy progression, view live stream (built-in webcam / demo video only), and read-only zone inspection. Control panel, process launches, zone editing, and simulations are restricted. |
+| `edge` | Service Credential (API Key) | Edge producers (Jetson Nano nodes, standalone `infer.py`, `zone_intrusion_pipeline.py`, backend stream worker). Granted access strictly to `POST /events` to ingest detection events. Cannot read alerts, stream, or configure system. |
+
+#### Authoritative Permission Matrix
+| Method | Path Template | Anon | Operator | Admin | Edge | Notes |
+|---|---|---|---|---|---|---|
+| `GET` | `/health` | yes | yes | yes | yes | System liveness probe |
+| `GET` | `/` | yes | yes | yes | yes | Static dashboard interface |
+| `GET` | `/docs`, `/redoc`, `/openapi.json` | - | - | yes | - | API documentation restricted to Admin |
+| `POST` | `/auth/login`, `/auth/logout` | yes | yes | yes | yes | Session initiation and termination |
+| `GET` | `/auth/me` | - | yes | yes | yes | Active session / identity query |
+| `POST` | `/auth/change-password` | - | yes | yes | yes | Forced on initial login or admin reset |
+| `POST` | `/events` | - | - | yes | yes | Detection ingestion by edge producers |
+| `POST` | `/feedback` | - | yes | yes | - | Operator human-in-the-loop decisions |
+| `GET` | `/alerts`, `/alerts/{event_id}` | - | yes | yes | - | Read-only safety incident queries |
+| `GET` | `/policy-history`, `/thresholds`| - | yes | yes | - | Read-only bandit policy queries |
+| `POST` | `/stream/start` | - | built-in | yes | - | Operator: built-in only; Admin: custom RTSP/URLs |
+| `POST` | `/stream/stop` | - | yes | yes | - | Stop running live stream worker |
+| `GET` | `/stream/status`, `/mjpeg`, `/latest-frame` | - | yes | yes | - | Video stream monitoring |
+| `GET` | `/zones` | - | yes | yes | - | Read-only zone polygon listing |
+| `POST` | `/zones`, `DELETE /zones/{cam}/{zone}` | - | - | yes | - | Zone polygon configuration |
+| `GET` | `/capture-frame` | - | - | yes | - | Reference frame calibration |
+| `GET` | `/processes`, `/processes/{name}/logs` | - | - | yes | - | Background subprocess inspection |
+| `POST` | `/processes/{name}/start`, `/stop` | - | - | yes | - | Federated demo and zone pipeline supervisor |
+| `POST` | `/retention/cleanup` | - | - | yes | - | GDPR / storage bounded cleanup |
+| `GET`, `POST` | `/admin/users*` | - | - | yes | - | User CRUD (atomic last-admin protection) |
+| `GET`, `POST` | `/admin/edge-keys*` | - | - | yes | - | Edge device API key management |
+| `GET` | `/admin/audit-log` | - | - | yes | - | Append-only security audit log |
+
+### 2.1 CLI Account & Key Bootstrap (`cloud/backend/manage.py`)
+
+Manage users and edge credentials directly from the command line:
+
+```bash
+# 1. Create Initial Administrator
+python -m cloud.backend.manage create-admin --username admin --password "StrongAdminPass123!"
+
+# 2. Create Safety Operator Account (Forces password change on first web login)
+python -m cloud.backend.manage create-user --username operator_jane --role operator --temp-password "InitialTempPass123!"
+
+# 3. List Registered Accounts
+python -m cloud.backend.manage list-users
+
+# 4. Issue Edge Device API Key (Secret shown once in terminal)
+python -m cloud.backend.manage create-edge-key --label "jetson-nano-south-01"
+
+# 5. List Edge Keys (Never displays raw secrets)
+python -m cloud.backend.manage list-edge-keys
+
+# 6. Revoke Edge Key
+python -m cloud.backend.manage revoke-edge-key --prefix <key_prefix>
+
+# 7. Reset User Password
+python -m cloud.backend.manage reset-password --username operator_jane --temp-password "NewTempPass123!"
+```
+
+### 2.2 Security Architecture Details
+- **Password Hashing:** Passwords are never stored in plaintext; hashed with Argon2id (`argon2-cffi`). Timing-attack mitigation employs pre-computed dummy verification.
+- **Session Tokens:** 256-bit entropy (`secrets.token_urlsafe(32)`), stored as SHA-256 digests in SQLite. Delivered via `HttpOnly`, `SameSite=Strict` cookies.
+- **CSRF Defense:** State-changing browser operations validate double-submit tokens (`X-CSRF-Token`).
+- **Append-Only Audit Trail:** SQLite database triggers (`audit_log_no_update`, `audit_log_no_delete`) enforce append-only immutability at the engine level.
+- **Internal Worker Credential:** Stream worker uses an ephemeral in-memory secret (`INTERNAL_STREAM_KEY`) generated once per backend lifespan and injected into child processes via environment variables (`AEGIS_EDGE_API_KEY`). No hardcoded keys exist in source code.
 
 ### 3. Data Retention & Incident Cleanup
 - **Automated Startup Pruning:** The backend executes retention enforcement on server lifespan startup.
@@ -119,11 +189,10 @@ By default, `run.py` binds to `0.0.0.0:8000` to allow operators on factory-floor
 2. **Firewall Rules:** Restrict port 8000 access to designated camera IP ranges and operator subnets.
 3. **Bind to Localhost:** If using a reverse proxy on the same host, set `AEGIS_HOST=127.0.0.1`.
 
-### 5. Honest Statement of Residual Security Gaps
-To prevent false assumptions regarding production security, note the following architectural boundaries:
-- **No TLS / HTTPS Out of the Box:** AEGIS runs plain HTTP. Any traffic over untrusted networks can be intercepted unless fronted by a TLS reverse proxy.
-- **Shared Secret vs. Individual Accounts:** Authentication uses a single shared secret key (`AEGIS_API_KEY`) and self-asserted operator call-signs, not individual user accounts, OAuth2/OIDC, or salted per-user password hashes.
-- **No Role-Based Access Control (RBAC):** Any holder of the valid API key has full permissions (can acknowledge alerts, start/stop processes, delete zones, and trigger retention cleanups).
-- **Local File Storage:** SQLite databases and video clips are stored with standard filesystem permissions without at-rest encryption. Ensure proper OS-level filesystem ACLs on the host machine.
+### 5. Honest Statement of Security Model & Residual Boundaries
+- **Mandatory Reverse Proxy for TLS:** AEGIS does not implement native TLS termination. For production deployment, a reverse proxy (e.g., Nginx, Caddy, Cloudflare) must terminate HTTPS, and `AEGIS_COOKIE_SECURE` should be set to `true`.
+- **Database at Rest:** SQLite databases (`aegis.db`) and recorded incident clips reside on the local filesystem with OS-level permissions. Systems requiring defense against physical disk seizure should employ OS-level full disk encryption (BitLocker, LUKS).
+- **Scope Delimitations:** AEGIS implements RBAC with local password and session management. Enterprise single sign-on (SSO), SAML/OIDC federation, and hardware multi-factor authentication (WebAuthn/FIDO2) are beyond current scope.
+- **Subprocess Isolation:** Background tasks run under the same OS service account as the backend process. Deployments on multi-tenant servers should run AEGIS within isolated containers or unprivileged systemd service units.
 
 
