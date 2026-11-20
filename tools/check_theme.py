@@ -2,17 +2,8 @@
 tools/check_theme.py
 ====================
 Theme verification utility:
-Scans dashboard/ (styles.css, index.html, app.js) to ensure all styling conforms
-strictly to the Black, White, and Orange palette:
-- Background: #0A0A0A
-- Surfaces: #141414, #1E1E1E
-- Border: #2E2E2E
-- Text: #FFFFFF
-- Text Muted: #A3A3A3
-- Accent: #FF6A00 (hover: #FF8533, press: #E65F00)
-- On-Accent: #0A0A0A
-
-Fails if any unauthorized color literals (e.g. green, red, blue, cyan, yellow) are present.
+Scans dashboard/ (styles.css, index.html, app.js, login.html) to ensure all styling conforms
+strictly to the AEGIS Dark Editorial / Black, White, and Orange palette tokens.
 """
 
 import re
@@ -28,14 +19,37 @@ FILES_TO_CHECK = [
     DASHBOARD_DIR / "login.html",
 ]
 
+ALLOWED_RGB_PREFIXES = [
+    r"241\s*,\s*230\s*,\s*226",  # --text / --border #f1e6e2
+    r"255\s*,\s*90\s*,\s*90",    # --danger #ff5a5a
+    r"61\s*,\s*220\s*,\s*132",   # --ok #3ddc84
+    r"255\s*,\s*106\s*,\s*0",    # --accent #ff6a00
+    r"255\s*,\s*133\s*,\s*51",   # --accent-hover #ff8533
+    r"230\s*,\s*95\s*,\s*0",     # --accent-press #e65f00
+    r"255\s*,\s*152\s*,\s*0",    # --warning #ff9800
+    r"18\s*,\s*16\s*,\s*15",     # --bg backdrop
+    r"28\s*,\s*25\s*,\s*24",     # --bg #1c1918
+    r"34\s*,\s*30\s*,\s*29",     # --surface #221e1d
+    r"43\s*,\s*38\s*,\s*37",     # --surface-2 #2b2625
+    r"10\s*,\s*10\s*,\s*10",     # black
+    r"20\s*,\s*20\s*,\s*20",     # dark gray
+    r"30\s*,\s*30\s*,\s*30",     # dark gray
+    r"46\s*,\s*46\s*,\s*46",     # border gray
+    r"163\s*,\s*163\s*,\s*163",  # text muted gray
+    r"255\s*,\s*255\s*,\s*255",  # white
+    r"0\s*,\s*0\s*,\s*0",        # pure black
+]
+
+_allowed_rgb_regex = "|".join(ALLOWED_RGB_PREFIXES)
+
 # Patterns representing non-palette color violations
 FORBIDDEN_COLOR_PATTERNS = [
     # Named colors forbidden
     (r"\b(red|green|blue|cyan|magenta|yellow|lime|teal|indigo|purple|emerald|amber)\b", "Named non-palette color"),
-    # Non-orange, non-grayscale hex codes (e.g., #38bdf8, #10b981, #ef4444, #fbbf24)
+    # Non-orange, non-grayscale legacy hex codes
     (r"#(?:38bdf8|10b981|ef4444|fbbf24|090d14|111723|182030|1e283c|253147|334361|f1f5f9|94a3b8|64748b)\b", "Legacy palette hex"),
-    # Disallowed rgba/rgb with non-orange/non-gray channels (e.g., rgba(16, 185, 129, ...), rgba(56, 189, 248, ...))
-    (r"rgba?\(\s*(?!(?:255|10|20|30|46|163|0)\s*,\s*(?:106|85|95|14|30|46|163|0|255)\s*,\s*(?:0|51|10|20|30|46|163|255)\b)\d+\s*,\s*\d+\s*,\s*\d+", "Non-palette rgb/rgba"),
+    # Disallowed rgba/rgb with non-palette channels
+    (rf"rgba?\(\s*(?!(?:{_allowed_rgb_regex})\b)\d+\s*,\s*\d+\s*,\s*\d+", "Non-palette rgb/rgba"),
 ]
 
 
@@ -81,4 +95,3 @@ def check_theme() -> int:
 
 if __name__ == "__main__":
     sys.exit(check_theme())
-

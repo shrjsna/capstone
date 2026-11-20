@@ -234,3 +234,20 @@ def anon_client():
 def client(admin_client):
     """Default client fixture providing admin access for backwards-compatible test suites."""
     return admin_client
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_demo_fixtures():
+    """Ensure mock demo video exists so CI tests pass without committing 5MB+ MP4 binaries."""
+    demo_dir = REPO_ROOT / "demo" / "videos"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+    demo_video = demo_dir / "zone_intrusion_demo.mp4"
+    created = False
+    if not demo_video.exists():
+        demo_video.write_bytes(b"")
+        created = True
+    yield
+    if created and demo_video.exists():
+        try:
+            demo_video.unlink()
+        except OSError:
+            pass

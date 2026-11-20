@@ -57,3 +57,5 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+*.db-shm
+*.db-wal
