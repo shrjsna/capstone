@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGIS Safety — Operations Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23FF6A00' d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/%3E%3C/svg%3E">
+  <link rel="alternate icon" href="favicon.ico">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body.login-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(circle at 50% 15%, rgba(255, 106, 0, 0.08) 0%, transparent 55%),
+        linear-gradient(to bottom, #0A0A0A, #141414);
+      padding: 24px 16px;
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      box-sizing: border-box;
+    }
+    .login-container {
+      width: 100%;
+      max-width: 420px;
+    }
+    .login-brand-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .login-brand-icon {
+      width: 58px;
+      height: 58px;
+      border-radius: 12px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      margin-bottom: 14px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+    .login-brand-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      margin: 0 0 6px 0;
+    }
+    .login-brand-sub {
+      font-size: 13px;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+      margin: 0;
+    }
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 30px 26px;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6);
+    }
+    .login-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 22px;
+    }
+    .login-card-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0;
+    }
+    .login-card-badge {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--accent);
+      border: 1px solid var(--border);
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+    .login-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .login-alert {
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.4;
+      display: none;
+      background: rgba(255, 106, 0, 0.12);
+      border: 1px solid var(--accent);
+      color: var(--text);
+    }
+    .login-footer-info {
+      margin-top: 22px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .pwd-requirements {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin: 0;
+    }
+  </style>
+</head>
+<body class="login-page">
+
+  <div class="login-container">
+    <div class="login-brand-header">
+      <div class="login-brand-icon">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <h1 class="login-brand-title">AEGIS SAFETY</h1>
+      <p class="login-brand-sub">Edge-Cloud Collaborative AI Operations Console</p>
+    </div>
+
+    <!-- Login View Card -->
+    <div id="card-login" class="login-card">
+      <div class="login-card-header">
+        <h2 class="login-card-title">Console Sign In</h2>
+        <span class="login-card-badge">RBAC SECURED</span>
+      </div>
+
+      <div id="login-alert" class="login-alert" role="alert"></div>
+
+      <form id="form-login-page" class="login-form">
+        <div class="form-group">
+          <label class="form-label" for="login-username">Operator / Admin Username</label>
+          <input type="text" id="login-username" class="form-input" required autocomplete="username" autofocus placeholder="Enter your username">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="login-password">Password</label>
+          <input type="password" id="login-password" class="form-input" required autocomplete="current-password" placeholder="Enter your password">
+        </div>
+        <button type="submit" id="btn-login-submit" class="btn-primary" style="margin-top: 6px; justify-content: center; width: 100%;">
+          Sign In to Console
+        </button>
+      </form>
+
+      <div class="login-footer-info">
+        <span>AEGIS Collaborative Safety v2.0</span>
+        <span>Default Roles: Admin &amp; Operator</span>
+      </div>
+    </div>
+
+    <!-- Mandatory Password Change Card (Active when must_change_password=True) -->
+    <div id="card-change-pwd" class="login-card" style="display: none;">
+      <div class="login-card-header">
+        <h2 class="login-card-title">Set New Password</h2>
+        <span class="login-card-badge" style="color: var(--accent);">ACTION REQUIRED</span>
+      </div>
+
+      <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 16px 0; line-height: 1.4;">
+        First-time operator access requires replacing your temporary credentials with a secure personal password.
+      </p>
+
+      <div id="change-pwd-alert" class="login-alert" role="alert"></div>
+
+      <form id="form-change-pwd-page" class="login-form">
+        <div class="form-group">
+          <label class="form-label" for="pwd-current">Current Temporary Password</label>
+          <input type="password" id="pwd-current" class="form-input" required autocomplete="current-password" placeholder="Current temporary password">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="pwd-new">New Password</label>
+          <input type="password" id="pwd-new" class="form-input" required autocomplete="new-password" placeholder="Choose a strong new password">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="pwd-confirm">Confirm New Password</label>
+          <input type="password" id="pwd-confirm" class="form-input" required autocomplete="new-password" placeholder="Confirm new password">
+        </div>
+        <p class="pwd-requirements">Must be at least 12 characters, include uppercase, lowercase, numbers, symbols, and not contain your username.</p>
+        <button type="submit" id="btn-change-pwd-submit" class="btn-primary" style="margin-top: 6px; justify-content: center; width: 100%;">
+          Update Password &amp; Launch Console
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    (function() {
+      let activeCsrfToken = null;
+      let authenticatedUser = null;
+
+      const cardLogin        = document.getElementById('card-login');
+      const cardChangePwd    = document.getElementById('card-change-pwd');
+      const formLogin        = document.getElementById('form-login-page');
+      const formChangePwd    = document.getElementById('form-change-pwd-page');
+      const loginAlert       = document.getElementById('login-alert');
+      const changePwdAlert   = document.getElementById('change-pwd-alert');
+      const btnLoginSubmit   = document.getElementById('btn-login-submit');
+      const btnChangeSubmit  = document.getElementById('btn-change-pwd-submit');
+
+      function showAlert(el, msg) {
+        el.textContent = msg;
+        el.style.display = 'block';
+      }
+
+      function hideAlert(el) {
+        el.textContent = '';
+        el.style.display = 'none';
+      }
+
+      // Check if user is already authenticated
+      async function checkCurrentSession() {
+        try {
+          const res = await fetch('/auth/me', { credentials: 'same-origin' });
+          if (res.ok) {
+            const data = await res.json();
+            authenticatedUser = data.user || data;
+            activeCsrfToken   = data.csrf_token;
+            if (authenticatedUser && authenticatedUser.must_change_password) {
+              showPasswordChangeView();
+            } else {
+              window.location.replace('/');
+            }
+          }
+        } catch (_) {}
+      }
+
+      function showPasswordChangeView() {
+        cardLogin.style.display = 'none';
+        cardChangePwd.style.display = 'block';
+        hideAlert(loginAlert);
+        hideAlert(changePwdAlert);
+        document.getElementById('pwd-current').focus();
+      }
+
+      // Handle Login submission
+      formLogin.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideAlert(loginAlert);
+
+        const username = document.getElementById('login-username').value.trim();
+        const password = document.getElementById('login-password').value;
+
+        if (!username || !password) {
+          showAlert(loginAlert, 'Please provide both username and password.');
+          return;
+        }
+
+        btnLoginSubmit.disabled = true;
+        btnLoginSubmit.textContent = 'Verifying credentials...';
+
+        try {
+          const res = await fetch('/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ username, password })
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            const errDetail = data.detail;
+            const msg = typeof errDetail === 'object' ? errDetail.message : (errDetail || 'Authentication failed.');
+            showAlert(loginAlert, msg);
+            return;
+          }
+
+          authenticatedUser = data.user || data;
+          activeCsrfToken   = data.csrf_token;
+
+          if (authenticatedUser && authenticatedUser.must_change_password) {
+            showPasswordChangeView();
+            showAlert(changePwdAlert, 'Initial login requires password change. Please set your new password below.');
+          } else {
+            window.location.replace('/');
+          }
+        } catch (err) {
+          showAlert(loginAlert, 'Network error connecting to backend: ' + err.message);
+        } finally {
+          btnLoginSubmit.disabled = false;
+          btnLoginSubmit.textContent = 'Sign In to Console';
+        }
+      });
+
+      // Handle Password Change submission
+      formChangePwd.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        hideAlert(changePwdAlert);
+
+        const old_password     = document.getElementById('pwd-current').value;
+        const new_password     = document.getElementById('pwd-new').value;
+        const confirm_password = document.getElementById('pwd-confirm').value;
+
+        if (!old_password || !new_password || !confirm_password) {
+          showAlert(changePwdAlert, 'All fields are required.');
+          return;
+        }
+
+        if (new_password !== confirm_password) {
+          showAlert(changePwdAlert, 'New password and confirmation do not match.');
+          return;
+        }
+
+        btnChangeSubmit.disabled = true;
+        btnChangeSubmit.textContent = 'Updating password...';
+
+        try {
+          const res = await fetch('/auth/change-password', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRF-Token': activeCsrfToken || ''
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ old_password, new_password, confirm_password })
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            const errDetail = data.detail;
+            const msg = typeof errDetail === 'object' ? errDetail.message : (errDetail || 'Password update failed.');
+            showAlert(changePwdAlert, msg);
+            return;
+          }
+
+          // Password updated successfully -> launch console
+          window.location.replace('/');
+        } catch (err) {
+          showAlert(changePwdAlert, 'Error updating password: ' + err.message);
+        } finally {
+          btnChangeSubmit.disabled = false;
+          btnChangeSubmit.textContent = 'Update Password & Launch Console';
+        }
+      });
+
+      checkCurrentSession();
+    })();
+  </script>
+</body>
+</html>
+

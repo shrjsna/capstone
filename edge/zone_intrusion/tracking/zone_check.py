@@ -64,10 +64,20 @@ def point_in_polygon(point, polygon):
 def check_box_in_zone(box, zone_config):
     """
     Convenience wrapper: given a bounding box and a loaded zone config,
-    returns True if that box's foot-point is inside the zone's polygon.
+    returns True if that box's foot-point OR centroid is inside the zone's polygon.
+    Checking centroid in addition to foot-point ensures reliable detection for
+    webcams and desktop monitoring where a person's feet are off-frame.
     """
+    polygon = zone_config.get("polygon", [])
+    if not polygon:
+        return False
     foot_point = get_foot_point(box)
-    return point_in_polygon(foot_point, zone_config["polygon"])
+    if point_in_polygon(foot_point, polygon):
+        return True
+    # Also check centroid (crucial for webcam / upper-body detections where feet are off-frame)
+    x1, y1, x2, y2 = box
+    centroid = ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
+    return point_in_polygon(centroid, polygon)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGIS — Collaborative AI Safety Operations Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23FF6A00' d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'/%3E%3C/svg%3E">
+  <link rel="alternate icon" href="favicon.ico">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">
+        <span class="pulse-ring"></span>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="system-name">AEGIS SAFETY</span>
+        <span class="system-sub">Edge-Cloud Collaborative AI</span>
+      </div>
+    </div>
+
+    <div class="header-status">
+      <div class="status-indicator">
+        <span class="dot live-dot"></span>
+        <span class="status-label">SYSTEM LIVE</span>
+      </div>
+      <div class="policy-badge">
+        <span class="badge-title">POLICY</span>
+        <span id="header-policy-ver" class="badge-val">v1.0.0</span>
+      </div>
+      <div class="user-profile-badge" id="header-user-profile">
+        <span class="user-avatar-icon">👤</span>
+        <span id="header-username" class="user-name">Loading...</span>
+        <span id="header-role-badge" class="role-badge">OPERATOR</span>
+        <button id="btn-header-logout" class="btn-logout" title="Sign Out of Session">Logout</button>
+      </div>
+      <div class="backend-url-selector" style="display:none;"><input type="text" id="api-url-input" placeholder="Backend API URL"></div>
+    </div>
+  </header>
+
+  <!-- Tab Navigation -->
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="alerts">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      Alert Feed
+    </button>
+    <button class="tab-btn" data-tab="stream">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M20 12c-2.4 4-5.6 6-8 6s-5.6-2-8-6c2.4-4 5.6-6 8-6s5.6 2 8 6z"/></svg>
+      Live Stream
+    </button>
+    <button class="tab-btn" data-tab="zones">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+      Draw Zone
+    </button>
+    <button class="tab-btn" data-tab="control" id="tab-btn-control">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Control Panel
+    </button>
+    <button class="tab-btn admin-only-tab" data-tab="users" id="tab-btn-users" style="display:none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Users & Keys
+    </button>
+    <button class="tab-btn admin-only-tab" data-tab="audit" id="tab-btn-audit" style="display:none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Audit Log
+    </button>
+  </nav>
+
+  <!-- ===== TAB: ALERT FEED ===== -->
+  <main class="console-grid tab-content active" id="tab-alerts">
+
+    <section class="panel feed-panel">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <h2>Real-Time Detection Feed</h2>
+          <span id="alert-count-badge" class="counter-pill">0 Alerts</span>
+        </div>
+        <div class="feed-controls">
+          <button id="btn-refresh" class="btn-icon" title="Refresh Feed">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+            </svg>
+          </button>
+          <div class="filter-group">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="ppe_violation">PPE Only</button>
+            <button class="filter-btn" data-filter="zone_intrusion">Intrusion Only</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Secondary Filter Toolbar (Camera, Time, Keyword) -->
+      <div class="alert-filter-bar">
+        <div class="filter-item">
+          <label for="alert-cam-filter" class="filter-label">Camera:</label>
+          <select id="alert-cam-filter" class="filter-select" aria-label="Filter by camera">
+            <option value="all">All Cameras</option>
+          </select>
+        </div>
+        <div class="filter-item">
+          <label for="alert-time-filter" class="filter-label">Time:</label>
+          <select id="alert-time-filter" class="filter-select" aria-label="Filter by time range">
+            <option value="all">All Records</option>
+            <option value="15m">Last 15 min</option>
+            <option value="1h">Last 1 hour</option>
+            <option value="24h">Last 24 hours</option>
+          </select>
+        </div>
+        <div class="filter-item filter-search-wrap">
+          <input type="text" id="alert-search-input" class="filter-search-input" placeholder="Filter alerts..." aria-label="Search alerts">
+        </div>
+      </div>
+
+      <div id="alert-feed-container" class="feed-container">
+        <div class="feed-empty-state" id="feed-empty">
+          <div class="empty-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+          </div>
+          <h3>No Safety Alerts Detected</h3>
+          <p>Listening for edge detection events...</p>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel side-panel">
+      <div class="sub-panel">
+        <div class="panel-header compact">
+          <h3>Zone Sensitivity Thresholds</h3>
+          <span class="info-tag">Human-in-the-Loop</span>
+        </div>
+        <p class="panel-desc">Thresholds auto-calibrate as operators confirm or reject alerts.</p>
+        <div id="thresholds-container" class="thresholds-list"></div>
+      </div>
+
+      <div class="sub-panel margin-top" id="panel-model-weights">
+        <div class="panel-header compact">
+          <h3>Live Decision Model Weights</h3>
+          <span class="info-tag" style="color:var(--accent);border-color:var(--accent);">ONLINE LINUCB</span>
+        </div>
+        <p class="panel-desc">Real-time Bayesian parameters (θ = A⁻¹b). Updates live on every Confirm / Reject.</p>
+        <div id="model-weights-container" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+      </div>
+
+      <div class="sub-panel margin-top">
+        <div class="panel-header compact" style="display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="margin:0;">Policy Evolution History</h3>
+          <button id="btn-checkpoint-policy" class="btn-primary" style="font-size:11px;padding:3px 8px;font-weight:600;" title="Deploy next validated policy release">+ Checkpoint</button>
+        </div>
+        <div id="policy-history-list" class="history-list"></div>
+      </div>
+
+      <div class="sub-panel margin-top demo-box" id="panel-simulate-alerts">
+        <div class="panel-header compact"><h3>Simulate Edge Detection</h3></div>
+        <p class="panel-desc">POST synthetic events to test backend decisioning (Admin only).</p>
+        <div class="demo-btn-grid">
+          <button id="btn-sim-ppe" class="btn-demo ppe">+ PPE Violation</button>
+          <button id="btn-sim-zone" class="btn-demo zone">+ Zone Intrusion</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ===== TAB: LIVE STREAM ===== -->
+  <main class="stream-layout tab-content" id="tab-stream">
+
+    <!-- Left: controls -->
+    <aside class="panel stream-controls-panel">
+      <div class="panel-header compact">
+        <h3>Live Source Configuration</h3>
+        <span id="stream-status-badge" class="stream-badge stopped">STOPPED</span>
+      </div>
+
+      <!-- Source type selector -->
+      <div class="form-group">
+        <label class="form-label">Source Type</label>
+        <div class="seg-control" id="source-type-seg">
+          <button class="seg-btn active" data-val="webcam">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M20.2 6c-.8-1.6-2.6-2-4.2-2H8C6.4 4 4.6 4.4 3.8 6 3 7.4 3 9.1 3 12s0 4.6.8 6c.8 1.6 2.6 2 4.2 2h8c1.6 0 3.4-.4 4.2-2 .8-1.4.8-3.1.8-6s0-4.6-.8-6z"/></svg>
+            Webcam
+          </button>
+          <button class="seg-btn" data-val="rtsp" id="btn-seg-rtsp">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            CCTV / IP Camera
+          </button>
+          <button class="seg-btn" data-val="file">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Video File
+          </button>
+        </div>
+      </div>
+
+      <!-- Source input (changes based on type) -->
+      <div class="form-group" id="source-input-group">
+        <label class="form-label" id="source-input-label">Camera Index</label>
+        <input type="text" id="stream-source-input" class="form-input" value="0" placeholder="0">
+        <p id="source-hint" class="form-hint">Enter 0 for default webcam, 1 for external USB camera.</p>
+      </div>
+
+      <!-- Detection mode -->
+      <div class="form-group">
+        <label class="form-label">Detection Mode</label>
+        <div class="seg-control" id="mode-seg">
+          <button class="seg-btn active" data-val="all">All (PPE + Zone)</button>
+          <button class="seg-btn" data-val="ppe">PPE Only</button>
+          <button class="seg-btn" data-val="zone_intrusion">Zone Only</button>
+        </div>
+      </div>
+
+      <!-- Zone config (shown in all and zone_intrusion mode) -->
+      <div class="form-group" id="zone-config-group">
+        <label class="form-label">Zone Config</label>
+        <select id="stream-zone-select" class="form-input">
+          <option value="">Loading zones...</option>
+        </select>
+        <p class="form-hint">Choose a saved zone. Create one in the Draw Zone tab.</p>
+      </div>
+
+      <!-- Camera / Zone IDs -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Camera ID</label>
+          <input type="text" id="stream-camera-id" class="form-input" value="stream_cam_01" placeholder="cam_01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Zone ID</label>
+          <input type="text" id="stream-zone-id" class="form-input" value="zone_A" placeholder="zone_A">
+        </div>
+      </div>
+
+      <!-- Advanced -->
+      <details class="form-advanced">
+        <summary class="form-label" style="cursor:pointer;">Advanced Settings</summary>
+        <div class="form-row" style="margin-top:8px;">
+          <div class="form-group">
+            <label class="form-label">Debounce Frames</label>
+            <input type="number" id="stream-debounce" class="form-input" value="3" min="1" max="30">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confidence</label>
+            <input type="number" id="stream-conf" class="form-input" value="0.60" min="0.05" max="0.99" step="0.05">
+          </div>
+        </div>
+      </details>
+
+      <!-- Start / Stop buttons -->
+      <div class="stream-btn-row">
+        <button id="btn-stream-start" class="btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Start Stream
+        </button>
+        <button id="btn-stream-stop" class="btn-secondary" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12"/></svg>
+          Stop Stream
+        </button>
+      </div>
+
+      <!-- Error display -->
+      <div id="stream-error-box" class="stream-error" style="display:none;"></div>
+
+      <!-- Status info -->
+      <div id="stream-info" class="stream-info" style="display:none;">
+        <div class="info-row"><span class="info-key">Source:</span><span id="info-source" class="info-val">—</span></div>
+        <div class="info-row"><span class="info-key">Mode:</span><span id="info-mode" class="info-val">—</span></div>
+        <div class="info-row"><span class="info-key">Events sent to alert feed automatically</span></div>
+      </div>
+
+      <!-- Phone camera note -->
+      <div class="phone-note">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span><strong>Phone camera?</strong> Use CCTV mode with your IP Webcam app URL (e.g. <code>http://192.168.x.x:8080/video</code>), or open this dashboard on the phone's browser directly.</span>
+      </div>
+    </aside>
+
+    <!-- Right: live feed display -->
+    <section class="panel stream-feed-panel">
+      <div class="panel-header compact">
+        <h3>Live Annotated Feed</h3>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="stream-live-dot" class="stream-live-indicator offline"></span>
+          <span id="stream-live-label" style="font-size:11px;color:var(--text-dim);">Not streaming</span>
+        </div>
+      </div>
+
+      <div class="stream-viewport" id="stream-viewport">
+        <div class="stream-placeholder" id="stream-placeholder">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="2"/><path d="M20 12c-2.4 4-5.6 6-8 6s-5.6-2-8-6c2.4-4 5.6-6 8-6s5.6 2 8 6z"/></svg>
+          <p>Configure a source and click <strong>Start Stream</strong></p>
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px;">Annotated video will appear here. PPE violations and zone intrusions are forwarded to the Alert Feed automatically.</p>
+        </div>
+        <!-- The MJPEG image — hidden until streaming starts -->
+        <img id="stream-img" class="stream-img" src="" alt="Live annotated stream" style="display:none;" crossorigin="anonymous">
+      </div>
+
+      <!-- Recent stream events (from the alert feed, filtered to stream camera) -->
+      <div class="stream-events-row">
+        <span style="font-size:11px;color:var(--text-dim);">Recent events from this stream appear in the Alert Feed tab and here:</span>
+        <div id="stream-recent-events" class="stream-recent-events"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== TAB: DRAW ZONE ===== -->
+  <main class="zone-layout tab-content" id="tab-zones">
+
+    <!-- Left: controls -->
+    <aside class="panel zone-controls-panel">
+      <div class="panel-header compact">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="info-tag" style="background:rgba(255,106,0,0.15);color:var(--accent);font-weight:700;">STEP 1</span>
+          <h3>Mark Restricted Zone</h3>
+        </div>
+      </div>
+      <p class="panel-desc">Mark restricted danger areas on your video stream or still frame. Then click <strong>"Detect Anyone Who Enters"</strong> to launch real-time intrusion monitoring.</p>
+
+      <!-- Source for capture -->
+      <div class="form-group">
+        <label class="form-label">Camera Source</label>
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="zone-capture-source" class="form-input" style="flex:1;" value="0" placeholder="0 | demo/videos/...">
+          <select id="zone-source-presets" class="form-input" style="width:115px;padding:6px 6px;font-size:12px;">
+            <option value="0">Webcam (0)</option>
+            <option value="demo/videos/zone_intrusion_demo.mp4">Demo Video</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button id="btn-capture-frame" class="btn-secondary" style="flex:1;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          Capture Frame
+        </button>
+        <button id="btn-live-stream-preview" class="btn-secondary" style="flex:1;" title="Toggle live camera preview to mark zone">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Live Preview
+        </button>
+      </div>
+
+      <!-- Zone Presets & Options -->
+      <div class="form-group">
+        <label class="form-label">Zone Options &amp; Danger Level</label>
+        <div class="zone-type-picker">
+          <button type="button" class="zone-type-pill active" data-type="restricted" data-color="#FF6A00" data-zoneid="zone_red_1">
+            <span class="dot-color dot-orange"></span> Zone: Restricted (Orange)
+          </button>
+          <button type="button" class="zone-type-pill" data-type="warning" data-color="#FF8533" data-zoneid="zone_caution_1">
+            <span class="dot-color dot-orange-light"></span> Zone: Warning (Accent Light)
+          </button>
+          <button type="button" class="zone-type-pill" data-type="custom" data-color="#E65F00" data-zoneid="zone_custom_1">
+            <span class="dot-color dot-orange-dark"></span> Zone: Custom (Deep Orange)
+          </button>
+        </div>
+      </div>
+
+      <!-- Zone metadata -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Camera ID</label>
+          <input type="text" id="zone-camera-id" class="form-input" value="cam_01" placeholder="cam_01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Zone ID</label>
+          <input type="text" id="zone-zone-id" class="form-input" value="zone_red_1" placeholder="zone_red_1">
+        </div>
+      </div>
+
+      <!-- Drawing Mode: Box vs Polygon -->
+      <div class="form-group">
+        <label class="form-label">Marking Method</label>
+        <div class="zone-mode-selector">
+          <button type="button" class="zone-draw-mode-btn active" data-mode="box" id="btn-mode-box">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+            Drag Box (Fast)
+          </button>
+          <button type="button" class="zone-draw-mode-btn" data-mode="polygon" id="btn-mode-poly">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+            Click Points (Custom)
+          </button>
+        </div>
+      </div>
+
+      <!-- Drawing controls & shape presets -->
+      <div class="zone-draw-controls">
+        <div class="zone-point-count">
+          <span class="form-label">Points:</span>
+          <span id="zone-point-count" class="badge-val">0</span>
+          <span style="font-size:11px;color:var(--text-dim);">(min 3)</span>
+        </div>
+        <div style="display:flex;gap:4px;">
+          <button type="button" id="btn-preset-center" class="btn-icon" title="Apply Center Box Preset" style="font-size:11px;width:auto;padding:0 6px;">
+            Center
+          </button>
+          <button type="button" id="btn-preset-floor" class="btn-icon" title="Apply Floor Hazard Preset" style="font-size:11px;width:auto;padding:0 6px;">
+            Floor
+          </button>
+          <button id="btn-zone-undo" class="btn-icon" title="Undo last point" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+          </button>
+          <button id="btn-zone-clear" class="btn-icon" title="Clear all points" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Save & Detection Action Buttons -->
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:6px;">
+        <button id="btn-zone-save" class="btn-secondary" style="width:100%;" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save Zone Config
+        </button>
+
+        <button id="btn-start-zone-detect" class="btn-primary btn-detect-zone-action" style="width:100%;" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Detect Anyone Who Enters
+        </button>
+      </div>
+
+      <div id="zone-save-result" class="zone-save-result" style="display:none;"></div>
+
+      <!-- Saved zones list -->
+      <div class="sub-panel margin-top" style="flex:1;overflow-y:auto;">
+        <div class="panel-header compact">
+          <h3>Saved Zones</h3>
+          <button id="btn-refresh-zones" class="btn-icon" title="Refresh list">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+          </button>
+        </div>
+        <div id="zones-list" class="zones-list">
+          <p style="font-size:12px;color:var(--text-dim);">Loading...</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Right: canvas drawing area -->
+    <section class="panel zone-canvas-panel">
+      <div class="panel-header compact" style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h3>Zone Marking Canvas</h3>
+          <span id="zone-status-badge" class="proc-badge badge-stopped" style="font-size:10px;">READY</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span id="canvas-hint" style="font-size:12px;color:var(--accent);">Click &amp; drag on the image to mark a restricted box</span>
+        </div>
+      </div>
+
+      <div class="canvas-container" id="canvas-container">
+        <div class="canvas-placeholder" id="canvas-placeholder">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <p style="font-weight:500;">Capture a frame or start Live Preview to begin marking</p>
+          <p style="font-size:12px;color:var(--text-dim);max-width:320px;">Use your camera or demo video to draw restricted zones where people should not enter.</p>
+        </div>
+        <canvas id="zone-canvas" style="display:none;cursor:crosshair;"></canvas>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== TAB: CONTROL PANEL ===== -->
+  <main class="control-layout tab-content" id="tab-control">
+
+    <section class="panel control-main-panel">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <h2>Process &amp; Orchestration Control Panel</h2>
+          <span class="info-tag">Subprocess Manager</span>
+        </div>
+        <div class="feed-controls">
+          <button id="btn-refresh-procs" class="btn-icon" title="Refresh Process Status">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p class="panel-desc" style="margin-bottom: 20px;">
+        Launch and supervise background processes directly from the browser. Eliminates manual terminal windows while keeping all actions within a strict server-side whitelist.
+      </p>
+
+      <div class="process-cards-grid">
+
+        <!-- Card: Federated Learning Demo -->
+        <div class="process-card" id="proc-card-federated_demo">
+          <div class="proc-header">
+            <div class="proc-title-wrap">
+              <span class="proc-dot status-dot-stopped" id="proc-dot-federated_demo"></span>
+              <div>
+                <h3 class="proc-name">Federated Learning Demo</h3>
+                <span class="proc-badge badge-stopped" id="proc-badge-federated_demo">STOPPED</span>
+              </div>
+            </div>
+            <div class="proc-actions">
+              <button class="btn-primary btn-proc-start" data-proc="federated_demo" id="btn-start-federated_demo">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Start FedAvg
+              </button>
+              <button class="btn-secondary btn-proc-stop" data-proc="federated_demo" id="btn-stop-federated_demo" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                Stop
+              </button>
+            </div>
+          </div>
+
+          <p class="proc-desc">
+            Orchestrates a Flower FedAvg aggregation server on <code class="inline-code">127.0.0.1:8089</code> and launches 2 edge clients (<code class="inline-code">site_1</code> and <code class="inline-code">site_2</code>) to retrain policy weights collaboratively.
+          </p>
+
+          <div class="proc-meta">
+            <div class="proc-meta-item">
+              <span class="meta-label">Active PIDs:</span>
+              <span class="meta-val" id="proc-pids-federated_demo">—</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Started:</span>
+              <span class="meta-val" id="proc-time-federated_demo">—</span>
+            </div>
+          </div>
+
+          <!-- Log toggle & section -->
+          <div class="proc-logs-section">
+            <div class="proc-logs-header">
+              <button class="btn-toggle-logs" data-proc="federated_demo" id="btn-toggle-federated_demo">
+                <svg class="chevron-icon" id="chevron-federated_demo" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <span class="logs-header-text">Process Logs (<span id="proc-logcount-federated_demo">0</span> lines)</span>
+              </button>
+              <div class="logs-actions">
+                <span class="log-poll-indicator" id="proc-poll-federated_demo" style="display:none;">
+                  <span class="dot-small pulse"></span> LIVE STREAMING
+                </span>
+                <button class="btn-icon btn-copy-logs" data-proc="federated_demo" title="Copy logs to clipboard">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="proc-logs-body" id="proc-logs-body-federated_demo">
+              <pre class="proc-log-view" id="proc-logs-federated_demo">Ready. Press "Start FedAvg" to launch.</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Zone Intrusion Pipeline -->
+        <div class="process-card" id="proc-card-zone_pipeline">
+          <div class="proc-header">
+            <div class="proc-title-wrap">
+              <span class="proc-dot status-dot-stopped" id="proc-dot-zone_pipeline"></span>
+              <div>
+                <h3 class="proc-name">Zone Intrusion Pipeline</h3>
+                <span class="proc-badge badge-stopped" id="proc-badge-zone_pipeline">STOPPED</span>
+              </div>
+            </div>
+            <div class="proc-actions">
+              <button class="btn-primary btn-proc-start" data-proc="zone_pipeline" id="btn-start-zone_pipeline">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Start Pipeline
+              </button>
+              <button class="btn-secondary btn-proc-stop" data-proc="zone_pipeline" id="btn-stop-zone_pipeline" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                Stop
+              </button>
+            </div>
+          </div>
+
+          <p class="proc-desc">
+            Executes standalone edge tracking with multi-point polygon containment, face-blurred MP4 incident clip recording, and JSONL logging.
+          </p>
+
+          <div class="proc-config-row">
+            <label for="zone-proc-source" class="form-label" style="font-size:12px;margin-bottom:0;min-width:85px;">Video Source:</label>
+            <div style="display:flex;gap:8px;flex:1;flex-wrap:wrap;">
+              <input type="text" id="zone-proc-source" class="form-input" style="flex:1;min-width:200px;padding:6px 10px;font-size:12px;" value="demo/videos/zone_intrusion_demo.mp4" placeholder="demo/videos/... or 0 or rtsp://...">
+              <select id="zone-proc-source-select" class="form-input" style="width:160px;padding:6px 8px;font-size:12px;">
+                <option value="demo/videos/zone_intrusion_demo.mp4">Demo Video (mp4)</option>
+                <option value="0">Local Webcam (0)</option>
+                <option value="1">External Webcam (1)</option>
+                <option value="custom">Custom Path/URL</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="proc-meta">
+            <div class="proc-meta-item">
+              <span class="meta-label">Active PIDs:</span>
+              <span class="meta-val" id="proc-pids-zone_pipeline">—</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Started:</span>
+              <span class="meta-val" id="proc-time-zone_pipeline">—</span>
+            </div>
+          </div>
+
+          <!-- Log toggle & section -->
+          <div class="proc-logs-section">
+            <div class="proc-logs-header">
+              <button class="btn-toggle-logs" data-proc="zone_pipeline" id="btn-toggle-zone_pipeline">
+                <svg class="chevron-icon" id="chevron-zone_pipeline" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                <span class="logs-header-text">Process Logs (<span id="proc-logcount-zone_pipeline">0</span> lines)</span>
+              </button>
+              <div class="logs-actions">
+                <span class="log-poll-indicator" id="proc-poll-zone_pipeline" style="display:none;">
+                  <span class="dot-small pulse"></span> LIVE STREAMING
+                </span>
+                <button class="btn-icon btn-copy-logs" data-proc="zone_pipeline" title="Copy logs to clipboard">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="proc-logs-body" id="proc-logs-body-zone_pipeline">
+              <pre class="proc-log-view" id="proc-logs-zone_pipeline">Ready. Press "Start Pipeline" to launch.</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card: Data Retention & Cleanup -->
+        <div class="process-card" id="proc-card-retention">
+          <div class="proc-header">
+            <div class="proc-title-wrap">
+              <span class="proc-dot status-dot-running" id="proc-dot-retention"></span>
+              <div>
+                <h3 class="proc-name">Data Retention &amp; Incident Cleanup</h3>
+                <span class="proc-badge badge-running">ACTIVE POLICY</span>
+              </div>
+            </div>
+            <div class="proc-actions">
+              <button class="btn-secondary" id="btn-run-retention-cleanup" title="Prune events and video clips exceeding retention window">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                Prune Aged Data Now
+              </button>
+            </div>
+          </div>
+          <p class="proc-desc">
+            Enforces GDPR / bounded-storage policies documented in decisions.md. Automatically purges video clips older than 7 days and events older than 30 days to prevent unbounded local disk accumulation.
+          </p>
+          <div class="proc-meta">
+            <div class="proc-meta-item">
+              <span class="meta-label">Clip Retention:</span>
+              <span class="meta-val">7 days</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Event Retention:</span>
+              <span class="meta-val">30 days (max 10,000)</span>
+            </div>
+            <div class="proc-meta-item">
+              <span class="meta-label">Last Status:</span>
+              <span class="meta-val" id="retention-status-label">Active (Cleaned on startup)</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== TAB: USERS & EDGE KEYS (ADMIN ONLY) ===== -->
+  <main class="console-grid tab-content" id="tab-users">
+    <section class="panel feed-panel">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <h2>User Accounts Administration</h2>
+          <span id="users-count-badge" class="counter-pill">0 Users</span>
+        </div>
+        <button id="btn-refresh-users" class="btn-secondary" style="font-size:12px;padding:6px 12px;">Refresh Accounts</button>
+      </div>
+      <div style="overflow-x:auto;margin-top:12px;">
+        <table class="data-table" id="table-users">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Username</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Password Status</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-users">
+            <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px;">Loading user accounts...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Edge Service Keys Section -->
+      <div class="panel-header" style="margin-top:32px;border-top:1px solid var(--border);padding-top:20px;">
+        <div class="panel-title-group">
+          <h2>Edge Device API Keys</h2>
+          <span id="keys-count-badge" class="counter-pill">0 Keys</span>
+        </div>
+        <button id="btn-refresh-keys" class="btn-secondary" style="font-size:12px;padding:6px 12px;">Refresh Keys</button>
+      </div>
+      <div id="issued-key-banner" class="alert-banner" style="display:none;margin-top:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <strong>New Edge Key Generated:</strong>
+            <div style="font-family:monospace;font-size:13px;color:var(--accent);margin-top:4px;" id="issued-key-val"></div>
+            <p style="font-size:11px;color:var(--text-muted);margin-top:2px;">Save this secret immediately. It is never displayed again.</p>
+          </div>
+          <button id="btn-copy-issued-key" class="btn-primary" style="font-size:12px;padding:6px 12px;">Copy Key</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;margin-top:12px;">
+        <table class="data-table" id="table-edge-keys">
+          <thead>
+            <tr>
+              <th>Prefix</th>
+              <th>Label</th>
+              <th>Created</th>
+              <th>Last Used</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-edge-keys">
+            <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">Loading edge keys...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Right Sidebar: Create User & Issue Key Forms -->
+    <aside class="sidebar-panel">
+      <div class="sub-panel">
+        <div class="panel-header compact"><h3>Create New Account</h3></div>
+        <form id="form-create-user" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+          <div>
+            <label class="form-label" for="new-user-username">Username</label>
+            <input type="text" id="new-user-username" class="form-input" required placeholder="e.g. operator_smith">
+          </div>
+          <div>
+            <label class="form-label" for="new-user-role">Role</label>
+            <select id="new-user-role" class="form-input">
+              <option value="operator">Operator (Safety Operations)</option>
+              <option value="admin">Administrator (Full Access)</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label" for="new-user-password">Initial Password</label>
+            <input type="password" id="new-user-password" class="form-input" required minlength="12" placeholder="Min 12 chars, upper, lower, num, symbol">
+            <span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;">Min 12 characters: 1 uppercase, 1 lowercase, 1 number, 1 special symbol.</span>
+          </div>
+          <button type="submit" class="btn-primary" style="margin-top:6px;">Create Account</button>
+        </form>
+      </div>
+
+      <div class="sub-panel margin-top">
+        <div class="panel-header compact"><h3>Issue Edge Key</h3></div>
+        <p class="panel-desc">Generate credentials for edge nodes, RTSP workers, or infer scripts.</p>
+        <form id="form-create-key" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+          <div>
+            <label class="form-label" for="new-key-label">Key Label / Camera Identifier</label>
+            <input type="text" id="new-key-label" class="form-input" required placeholder="e.g. edge-cam-south-01">
+          </div>
+          <button type="submit" class="btn-secondary" style="margin-top:6px;">Issue Edge Key</button>
+        </form>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ===== TAB: AUDIT LOG (ADMIN ONLY) ===== -->
+  <main class="console-grid tab-content" id="tab-audit">
+    <section class="panel feed-panel" style="grid-column:1 / -1;">
+      <div class="panel-header">
+        <div class="panel-title-group">
+          <h2>Append-Only Security Audit Trail</h2>
+          <span id="audit-count-badge" class="counter-pill">0 Entries</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <select id="audit-action-filter" class="form-input" style="width:160px;font-size:12px;padding:6px;">
+            <option value="">All Actions</option>
+            <option value="auth.login">Logins</option>
+            <option value="stream">Stream Controls</option>
+            <option value="zone">Zone Operations</option>
+            <option value="user">User Admin</option>
+            <option value="edge_key">Edge Keys</option>
+            <option value="federated">Federated Learning</option>
+            <option value="retention">Retention Prune</option>
+            <option value="access.denied">Refusals (401/403)</option>
+          </select>
+          <button id="btn-refresh-audit" class="btn-secondary" style="font-size:12px;padding:6px 12px;">Refresh Audit Trail</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;margin-top:12px;">
+        <table class="data-table" id="table-audit">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Timestamp (UTC)</th>
+              <th>Actor</th>
+              <th>Role</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Outcome</th>
+              <th>Client IP</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-audit">
+            <tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px;">Loading audit trail...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;">
+        <span style="font-size:12px;color:var(--text-muted);" id="audit-pagination-info">Showing entries</span>
+        <div style="display:flex;gap:8px;">
+          <button id="btn-audit-prev" class="btn-secondary" style="font-size:12px;padding:4px 10px;">Previous</button>
+          <button id="btn-audit-next" class="btn-secondary" style="font-size:12px;padding:4px 10px;">Next</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Login Modal Overlay -->
+  <div id="login-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:400px;">
+      <div class="modal-header">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="color:var(--accent);font-size:20px;">🛡️</span>
+          <h3 style="font-size:18px;margin:0;">AEGIS Operations Login</h3>
+        </div>
+      </div>
+      <p class="modal-desc" style="margin-top:8px;">Sign in with your operator or administrator credentials to access the safety console.</p>
+      <form id="form-login" style="margin-top:16px;display:flex;flex-direction:column;gap:12px;">
+        <div id="login-error" class="error-banner" style="display:none;"></div>
+        <div>
+          <label class="form-label" for="login-username">Username</label>
+          <input type="text" id="login-username" class="form-input" required autocomplete="username" placeholder="Username">
+        </div>
+        <div>
+          <label class="form-label" for="login-password">Password</label>
+          <input type="password" id="login-password" class="form-input" required autocomplete="current-password" placeholder="Password">
+        </div>
+        <button type="submit" class="btn-primary" style="margin-top:8px;padding:10px;">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Mandatory Change Password Modal -->
+  <div id="change-pwd-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:420px;">
+      <div class="modal-header">
+        <h3 style="font-size:17px;margin:0;">Password Update Required</h3>
+      </div>
+      <p class="modal-desc" style="margin-top:8px;">Your account requires a new password before accessing console operations.</p>
+      <form id="form-change-pwd" style="margin-top:14px;display:flex;flex-direction:column;gap:10px;">
+        <div id="change-pwd-error" class="error-banner" style="display:none;"></div>
+        <div>
+          <label class="form-label" for="change-pwd-old">Current / Temporary Password</label>
+          <input type="password" id="change-pwd-old" class="form-input" required placeholder="Current password">
+        </div>
+        <div>
+          <label class="form-label" for="change-pwd-new">New Password</label>
+          <input type="password" id="change-pwd-new" class="form-input" required placeholder="New password">
+        </div>
+        <div>
+          <label class="form-label" for="change-pwd-confirm">Confirm New Password</label>
+          <input type="password" id="change-pwd-confirm" class="form-input" required placeholder="Repeat new password">
+        </div>
+        <p class="form-hint" style="font-size:11px;color:var(--text-muted);margin:0;">Minimum 12 characters, including uppercase, lowercase, numbers, and symbols.</p>
+        <button type="submit" class="btn-primary" style="margin-top:8px;">Update Password & Continue</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Federated Learning Confirmation Modal -->
+  <div id="fed-confirm-modal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="modal-header">
+        <h3 style="font-size:17px;margin:0;">Confirm Federated Learning Launch</h3>
+        <button id="btn-close-fed-modal" class="btn-icon">✕</button>
+      </div>
+      <p class="modal-desc" style="margin-top:10px;">
+        Launching Federated Learning will spawn the Flower central aggregation server on port 8089 and two isolated edge client worker processes.
+      </p>
+      <div class="modal-actions" style="margin-top:18px;display:flex;justify-content:flex-end;gap:10px;">
+        <button id="btn-cancel-fed" class="btn-secondary">Cancel</button>
+        <button id="btn-confirm-fed" class="btn-primary">Confirm &amp; Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

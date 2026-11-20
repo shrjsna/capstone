@@ -1,0 +1,51 @@
+{
+  "fix1_375px": {
+    "pass": true,
+    "diagnostics": {
+      "tabUsersDisplay": "grid",
+      "tabUsersGridColumns": "493.138px",
+      "titleOrder": "0",
+      "asideOrder": "1",
+      "feedOrder": "2",
+      "tabTop": 5732.89990234375,
+      "titleTop": 5744.89990234375,
+      "asideTop": 5833.7001953125,
+      "feedTop": 6472,
+      "formCreateUserTop": 5891.80029296875,
+      "asideOffsetInsideTab": 100.80029296875,
+      "feedOffsetInsideTab": 739.10009765625,
+      "isAsideAfterTitle": true,
+      "isAsideBeforeFeed": true
+    }
+  },
+  "fix1_900px": {
+    "pass": true,
+    "diagnostics": {
+      "tabUsersDisplay": "grid",
+      "tabUsersGridColumns": "843.2px",
+      "titleOrder": "0",
+      "asideOrder": "1",
+      "feedOrder": "2",
+      "tabTop": 4850.10009765625,
+      "titleTop": 4870.10009765625,
+      "asideTop": 4962.5,
+      "feedTop": 5600.80029296875,
+      "formCreateUserTop": 5020.60009765625,
+      "asideOffsetInsideTab": 112.39990234375,
+      "feedOffsetInsideTab": 750.7001953125,
+      "isAsideAfterTitle": true,
+      "isAsideBeforeFeed": true
+    }
+  },
+  "fix2": {
+    "pass": true,
+    "diagnostics": {
+      "currentUrl": "http://127.0.0.1:8000/login.html",
+      "googleFontLinksCount": 0,
+      "brandTitleFontFamily": "Unbounded, \"Arial Black\", Impact, sans-serif",
+      "cardTitleFontFamily": "Unbounded, \"Arial Black\", Impact, sans-serif",
+      "bodyFontFamily": "Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+    },
+    "external_requests": []
+  }
+}
